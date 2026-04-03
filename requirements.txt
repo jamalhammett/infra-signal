@@ -1,4 +1,7 @@
-psycopg[binary]
+streamlit
+pandas
+requests
 python-dotenv
-httpx
 psycopg[binary]
+psycopg2-binary
+httpx
