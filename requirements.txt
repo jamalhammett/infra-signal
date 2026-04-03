@@ -1,3 +1,4 @@
 psycopg[binary]
 python-dotenv
 httpx
+psycopg[binary]
