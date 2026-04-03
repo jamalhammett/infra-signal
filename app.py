@@ -17,11 +17,12 @@ st.set_page_config(
     page_title="InfraSignal",
     layout="wide"
 )
+
 st.title("InfraSignal")
 st.caption("Early Infrastructure Intelligence Platform")
 
 if not DATABASE_URL:
-    st.error("DATABASE_URL not found in .env")
+    st.error("DATABASE_URL not found")
     st.stop()
 
 
@@ -39,16 +40,13 @@ def run_script(command: list[str]) -> tuple[str, str]:
     return result.stdout, result.stderr
 
 
-# -----------------------------
-# ACTION BAR
-# -----------------------------
 st.subheader("Pipeline Controls")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
     if st.button("Ingest Loudoun API Signals", use_container_width=True):
-        stdout, stderr = run_script(["python", r"scripts\generate_signals_from_api.py"])
+        stdout, stderr = run_script(["python", "scripts/generate_signals_from_api.py"])
         if stdout:
             st.text(stdout)
         if stderr:
@@ -56,7 +54,7 @@ with col1:
 
 with col2:
     if st.button("Promote Signals to Projects", use_container_width=True):
-        stdout, stderr = run_script(["python", r"scripts\promote_signals_to_projects.py"])
+        stdout, stderr = run_script(["python", "scripts/promote_signals_to_projects.py"])
         if stdout:
             st.text(stdout)
         if stderr:
@@ -65,8 +63,8 @@ with col2:
 with col3:
     if st.button("Run Full Loudoun Pipeline", use_container_width=True):
         steps = [
-            ["python", r"scripts\generate_signals_from_api.py"],
-            ["python", r"scripts\promote_signals_to_projects.py"],
+            ["python", "scripts/generate_signals_from_api.py"],
+            ["python", "scripts/promote_signals_to_projects.py"],
         ]
 
         full_output = []
@@ -83,9 +81,6 @@ with col3:
         st.text("\n".join(full_output))
 
 
-# -----------------------------
-# PIPELINE HEALTH
-# -----------------------------
 st.subheader("Pipeline Health")
 
 health_df = run_query("""
@@ -114,10 +109,6 @@ cross join latest_project lp
 
 st.dataframe(health_df, use_container_width=True)
 
-
-# -----------------------------
-# TOP OPPORTUNITIES
-# -----------------------------
 st.header("Top Opportunities")
 
 top_projects_df = run_query("""
@@ -139,10 +130,6 @@ limit 50
 
 st.dataframe(top_projects_df, use_container_width=True)
 
-
-# -----------------------------
-# APPROVED OPPORTUNITIES
-# -----------------------------
 st.header("Approved Opportunities")
 
 approved_df = run_query("""
@@ -164,10 +151,6 @@ limit 50
 
 st.dataframe(approved_df, use_container_width=True)
 
-
-# -----------------------------
-# IN REVIEW PIPELINE
-# -----------------------------
 st.header("In Review Pipeline")
 
 review_df = run_query("""
@@ -189,10 +172,6 @@ limit 50
 
 st.dataframe(review_df, use_container_width=True)
 
-
-# -----------------------------
-# PROJECT TYPE BREAKDOWN
-# -----------------------------
 st.header("Project Type Breakdown")
 
 project_type_df = run_query("""
@@ -209,10 +188,6 @@ limit 25
 
 st.dataframe(project_type_df, use_container_width=True)
 
-
-# -----------------------------
-# PROJECT STAGE BREAKDOWN
-# -----------------------------
 st.header("Project Stage Breakdown")
 
 project_stage_df = run_query("""
@@ -228,10 +203,6 @@ order by project_count desc
 
 st.dataframe(project_stage_df, use_container_width=True)
 
-
-# -----------------------------
-# RECENT PROJECTS
-# -----------------------------
 st.header("Recent Projects")
 
 recent_projects_df = run_query("""
@@ -251,10 +222,6 @@ limit 100
 
 st.dataframe(recent_projects_df, use_container_width=True)
 
-
-# -----------------------------
-# RECENT SIGNALS
-# -----------------------------
 st.header("Recent Signals")
 
 signals_df = run_query("""
@@ -273,10 +240,6 @@ limit 100
 
 st.dataframe(signals_df, use_container_width=True)
 
-
-# -----------------------------
-# RAW SOURCE MONITORING
-# -----------------------------
 with st.expander("Source Monitoring", expanded=False):
     st.subheader("Recent Source Runs")
     runs_df = run_query("""
