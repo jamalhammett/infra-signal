@@ -14,12 +14,11 @@ else:
     DATABASE_URL = os.getenv("DATABASE_URL")
 
 st.set_page_config(
-    page_title="Allen Hammett AI - Construction Signal Engine",
+    page_title="InfraSignal",
     layout="wide"
 )
-
-st.title("Construction Signal Engine")
-st.caption("Loudoun County early construction demand intelligence")
+st.title("InfraSignal")
+st.caption("Early Infrastructure Intelligence Platform")
 
 if not DATABASE_URL:
     st.error("DATABASE_URL not found in .env")
