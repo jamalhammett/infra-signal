@@ -1,6 +1,4 @@
 import os
-import sys
-import subprocess
 
 import pandas as pd
 import psycopg
@@ -15,12 +13,37 @@ else:
     DATABASE_URL = os.getenv("DATABASE_URL")
 
 st.set_page_config(
-    page_title="InfraSignal",
+    page_title="Infrastructure Intelligence Platform",
     layout="wide"
 )
 
-st.title("InfraSignal")
-st.caption("Early Infrastructure Intelligence Platform")
+
+def check_login():
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.title("Allen Hammett AI")
+        st.subheader("Private Infrastructure Intelligence Access")
+
+        password = st.text_input("Enter Access Code", type="password")
+
+        if password == "dewalt2026":
+            st.session_state.authenticated = True
+            st.rerun()
+        elif password:
+            st.error("Invalid access code")
+
+        st.stop()
+
+
+check_login()
+
+st.title("Infrastructure Intelligence Platform")
+st.caption("Allen Hammett AI — Private Access Preview")
+st.info(
+    "This preview surfaces early-stage land control and infrastructure development signals before traditional procurement visibility."
+)
 
 if not DATABASE_URL:
     st.error("DATABASE_URL not found")
@@ -36,57 +59,7 @@ def run_query(sql: str) -> pd.DataFrame:
     return df
 
 
-def run_script(script_path: str) -> tuple[str, str]:
-    result = subprocess.run(
-        [sys.executable, script_path],
-        capture_output=True,
-        text=True
-    )
-    return result.stdout, result.stderr
-
-
-st.subheader("Pipeline Controls")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("Ingest Loudoun API Signals", use_container_width=True):
-        stdout, stderr = run_script("scripts/generate_signals_from_api.py")
-        if stdout:
-            st.text(stdout)
-        if stderr:
-            st.error(stderr)
-
-with col2:
-    if st.button("Promote Signals to Projects", use_container_width=True):
-        stdout, stderr = run_script("scripts/promote_signals_to_projects.py")
-        if stdout:
-            st.text(stdout)
-        if stderr:
-            st.error(stderr)
-
-with col3:
-    if st.button("Run Full Loudoun Pipeline", use_container_width=True):
-        steps = [
-            "scripts/generate_signals_from_api.py",
-            "scripts/promote_signals_to_projects.py",
-        ]
-
-        full_output = []
-
-        for step in steps:
-            stdout, stderr = run_script(step)
-            full_output.append(f"$ {step}")
-            if stdout:
-                full_output.append(stdout)
-            if stderr:
-                full_output.append("ERROR:")
-                full_output.append(stderr)
-
-        st.text("\n".join(full_output))
-
-
-st.subheader("Pipeline Health")
+st.subheader("Platform Health")
 
 health_df = run_query("""
 with signal_counts as (
@@ -114,7 +87,39 @@ cross join latest_project lp
 
 st.dataframe(health_df, use_container_width=True)
 
-st.header("Top Opportunities")
+st.header("High-Value Infrastructure Watchlist")
+
+watchlist_df = run_query("""
+select
+    case_number,
+    canonical_project_name,
+    project_type,
+    project_stage,
+    opportunity_score,
+    county,
+    state,
+    description
+from projects
+where case_number is not null
+  and canonical_project_name <> 'Test Signal'
+  and (
+        project_type ilike '%industrial%'
+     or project_type ilike '%commercial%'
+     or project_type ilike '%site%'
+     or description ilike '%data center%'
+     or description ilike '%datacenter%'
+     or description ilike '%cloud%'
+     or description ilike '%server%'
+     or description ilike '%substation%'
+     or description ilike '%warehouse%'
+  )
+order by opportunity_score desc, created_at desc
+limit 50
+""")
+
+st.dataframe(watchlist_df, use_container_width=True)
+
+st.header("Top Priority Opportunities")
 
 top_projects_df = run_query("""
 select
@@ -124,7 +129,8 @@ select
     project_stage,
     opportunity_score,
     county,
-    state
+    state,
+    description
 from projects
 where case_number is not null
   and canonical_project_name <> 'Test Signal'
@@ -135,7 +141,27 @@ limit 50
 
 st.dataframe(top_projects_df, use_container_width=True)
 
-st.header("Approved Opportunities")
+st.header("Top Landholders")
+
+landholders_df = run_query("""
+select
+    canonical_project_name,
+    count(*) as filings,
+    count(distinct case_number) as unique_cases,
+    min(created_at) as first_seen,
+    max(created_at) as last_seen
+from projects
+where case_number is not null
+  and canonical_project_name <> 'Test Signal'
+group by canonical_project_name
+having count(*) > 1
+order by filings desc, last_seen desc
+limit 50
+""")
+
+st.dataframe(landholders_df, use_container_width=True)
+
+st.header("Approved Pipeline")
 
 approved_df = run_query("""
 select
@@ -144,6 +170,8 @@ select
     project_type,
     project_stage,
     opportunity_score,
+    county,
+    state,
     description
 from projects
 where case_number is not null
@@ -156,7 +184,7 @@ limit 50
 
 st.dataframe(approved_df, use_container_width=True)
 
-st.header("In Review Pipeline")
+st.header("Active Development Pipeline")
 
 review_df = run_query("""
 select
@@ -165,11 +193,13 @@ select
     project_type,
     project_stage,
     opportunity_score,
+    county,
+    state,
     description
 from projects
 where case_number is not null
   and canonical_project_name <> 'Test Signal'
-  and project_stage = 'In Review'
+  and project_stage in ('In Review', 'Pending')
   and project_type not ilike '%Agricultural%'
 order by opportunity_score desc, created_at desc
 limit 50
@@ -227,25 +257,23 @@ limit 100
 
 st.dataframe(recent_projects_df, use_container_width=True)
 
-st.header("Recent Signals")
+with st.expander("Operational Monitoring", expanded=False):
+    st.subheader("Recent Signals")
+    signals_df = run_query("""
+    select
+        case_number,
+        project_name,
+        project_type,
+        project_stage,
+        confidence_score,
+        created_at
+    from signals
+    where case_number is not null
+    order by created_at desc
+    limit 100
+    """)
+    st.dataframe(signals_df, use_container_width=True)
 
-signals_df = run_query("""
-select
-    case_number,
-    project_name,
-    project_type,
-    project_stage,
-    confidence_score,
-    created_at
-from signals
-where case_number is not null
-order by created_at desc
-limit 100
-""")
-
-st.dataframe(signals_df, use_container_width=True)
-
-with st.expander("Source Monitoring", expanded=False):
     st.subheader("Recent Source Runs")
     runs_df = run_query("""
     select id, status, run_started_at, run_finished_at, records_found, records_inserted
