@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 
 import pandas as pd
@@ -35,8 +36,12 @@ def run_query(sql: str) -> pd.DataFrame:
     return df
 
 
-def run_script(command: list[str]) -> tuple[str, str]:
-    result = subprocess.run(command, capture_output=True, text=True)
+def run_script(script_path: str) -> tuple[str, str]:
+    result = subprocess.run(
+        [sys.executable, script_path],
+        capture_output=True,
+        text=True
+    )
     return result.stdout, result.stderr
 
 
@@ -46,7 +51,7 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     if st.button("Ingest Loudoun API Signals", use_container_width=True):
-        stdout, stderr = run_script(["python", "scripts/generate_signals_from_api.py"])
+        stdout, stderr = run_script("scripts/generate_signals_from_api.py")
         if stdout:
             st.text(stdout)
         if stderr:
@@ -54,7 +59,7 @@ with col1:
 
 with col2:
     if st.button("Promote Signals to Projects", use_container_width=True):
-        stdout, stderr = run_script(["python", "scripts/promote_signals_to_projects.py"])
+        stdout, stderr = run_script("scripts/promote_signals_to_projects.py")
         if stdout:
             st.text(stdout)
         if stderr:
@@ -63,15 +68,15 @@ with col2:
 with col3:
     if st.button("Run Full Loudoun Pipeline", use_container_width=True):
         steps = [
-            ["python", "scripts/generate_signals_from_api.py"],
-            ["python", "scripts/promote_signals_to_projects.py"],
+            "scripts/generate_signals_from_api.py",
+            "scripts/promote_signals_to_projects.py",
         ]
 
         full_output = []
 
         for step in steps:
             stdout, stderr = run_script(step)
-            full_output.append(f"$ {' '.join(step)}")
+            full_output.append(f"$ {step}")
             if stdout:
                 full_output.append(stdout)
             if stderr:
