@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal, InvalidOperation
 
 import psycopg
 import requests
@@ -11,11 +12,46 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not found in .env")
 
-URL = "https://logis.loudoun.gov/gis/rest/services/Projects/LOLA_DATA/MapServer/0/query?where=1=1&outFields=*&returnGeometry=false&f=json"
+URL = (
+    "https://logis.loudoun.gov/gis/rest/services/Projects/LOLA_DATA/MapServer/0/query"
+    "?where=1=1&outFields=*&returnGeometry=false&f=json"
+)
 
-# First-pass test size so you can confirm inserts quickly.
-# Change to None later when ready for all records.
 TEST_LIMIT = None
+
+
+def clean_text(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def clean_decimal(value):
+    if value in (None, "", "null"):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def pick_first(attrs, keys):
+    for key in keys:
+        value = attrs.get(key)
+        cleaned = clean_text(value)
+        if cleaned is not None:
+            return cleaned
+    return None
+
+
+def pick_decimal(attrs, keys):
+    for key in keys:
+        value = attrs.get(key)
+        cleaned = clean_decimal(value)
+        if cleaned is not None:
+            return cleaned
+    return None
 
 
 def main():
@@ -46,7 +82,9 @@ def main():
 
         row = cur.fetchone()
         if not row:
-            raise ValueError("Could not find source_registry row for Loudoun Land Applications")
+            raise ValueError(
+                "Could not find source_registry row for Loudoun Land Applications"
+            )
 
         source_id = row[0]
         print(f"Using source_id: {source_id}", flush=True)
@@ -57,11 +95,86 @@ def main():
         for feature in features:
             attrs = feature.get("attributes", {})
 
-            case_number = attrs.get("PlanNumber")
-            project_name = attrs.get("PlanName")
-            project_type = attrs.get("PlanType")
-            project_stage = attrs.get("PlanStatus")
-            description = attrs.get("PlanDescription")
+            case_number = clean_text(attrs.get("PlanNumber"))
+            project_name = clean_text(attrs.get("PlanName"))
+            project_type = clean_text(attrs.get("PlanType"))
+            project_stage = clean_text(attrs.get("PlanStatus"))
+            description = clean_text(attrs.get("PlanDescription"))
+
+            applicant_name = pick_first(
+                attrs,
+                [
+                    "ApplicantName",
+                    "Applicant",
+                    "Applicant_Name",
+                    "PlanApplicant",
+                    "ContactName",
+                ],
+            )
+
+            owner_name = pick_first(
+                attrs,
+                [
+                    "OwnerName",
+                    "Owner",
+                    "Owner_Name",
+                    "PropertyOwner",
+                ],
+            )
+
+            contractor_name = pick_first(
+                attrs,
+                [
+                    "ContractorName",
+                    "Contractor",
+                    "BuilderName",
+                    "GeneralContractor",
+                    "EngineerName",
+                    "ConsultantName",
+                ],
+            )
+
+            address_raw = pick_first(
+                attrs,
+                [
+                    "Address",
+                    "AddressRaw",
+                    "SiteAddress",
+                    "PropertyAddress",
+                    "FullAddress",
+                    "Location",
+                ],
+            )
+
+            parcel_id = pick_first(
+                attrs,
+                [
+                    "ParcelID",
+                    "ParcelId",
+                    "PIN",
+                    "TaxMapNumber",
+                    "TaxMapNo",
+                ],
+            )
+
+            estimated_value = pick_decimal(
+                attrs,
+                [
+                    "EstimatedValue",
+                    "ProjectValue",
+                    "Value",
+                    "ConstructionValue",
+                ],
+            )
+
+            hearing_date = pick_first(
+                attrs,
+                [
+                    "HearingDate",
+                    "PublicHearingDate",
+                    "ApplicationDateText",
+                ],
+            )
 
             if not case_number:
                 skipped += 1
@@ -75,14 +188,23 @@ def main():
                     case_number,
                     project_name,
                     project_description,
+                    hearing_date,
+                    applicant_name,
+                    owner_name,
+                    contractor_name,
+                    parcel_id,
+                    address_raw,
                     county,
                     state,
+                    estimated_value,
                     project_type,
                     project_stage,
                     confidence_score,
                     created_at
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                values (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
+                )
                 on conflict do nothing
                 """,
                 (
@@ -91,12 +213,19 @@ def main():
                     case_number,
                     project_name,
                     description,
+                    hearing_date,
+                    applicant_name,
+                    owner_name,
+                    contractor_name,
+                    parcel_id,
+                    address_raw,
                     "Loudoun",
                     "VA",
+                    estimated_value,
                     project_type,
                     project_stage,
                     90,
-                )
+                ),
             )
 
             inserted += 1
