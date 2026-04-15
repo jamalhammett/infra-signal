@@ -1,9 +1,10 @@
 import os
+from datetime import datetime, timezone
+
 import pandas as pd
 import psycopg
 import streamlit as st
 from dotenv import load_dotenv
-from datetime import datetime
 
 load_dotenv()
 
@@ -17,7 +18,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- LOGIN ----------------
+
 def check_login():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -36,15 +37,19 @@ def check_login():
 
         st.stop()
 
+
 check_login()
 
-# ---------------- HEADER ----------------
 st.title("Infrastructure Intelligence Platform")
 st.caption("Allen Hammett AI — Private Access Preview")
 
 st.success("🟢 LIVE OPPORTUNITIES: Active infrastructure projects in pre-construction window (0–6 months)")
 
-# ---------------- DB QUERY ----------------
+if not DATABASE_URL:
+    st.error("DATABASE_URL not found")
+    st.stop()
+
+
 def run_query(sql: str) -> pd.DataFrame:
     conn = psycopg.connect(DATABASE_URL)
     try:
@@ -53,7 +58,7 @@ def run_query(sql: str) -> pd.DataFrame:
         conn.close()
     return df
 
-# ---------------- CORE DATA ----------------
+
 df = run_query("""
 select
     case_number,
@@ -76,11 +81,10 @@ order by created_at desc
 limit 100
 """)
 
-# 🔥 FIX: Convert created_at to datetime
-df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
 
-# ---------------- LOGIC ----------------
-def classify_stage(stage):
+
+def classify_stage(stage: str) -> str:
     if stage in ["Approved", "In Review"]:
         return "🟢 Act Now"
     elif stage in ["Planning Correspondence"]:
@@ -88,7 +92,8 @@ def classify_stage(stage):
     else:
         return "🔵 Track"
 
-def action_text(stage):
+
+def action_text(stage: str) -> str:
     if stage in ["Approved", "In Review"]:
         return "Engage immediately — vendor selection likely active"
     elif stage in ["Planning Correspondence"]:
@@ -96,11 +101,13 @@ def action_text(stage):
     else:
         return "Monitor only — long-term opportunity"
 
-def freshness_label(date):
-    if pd.isnull(date):
+
+def freshness_label(date_value) -> str:
+    if pd.isnull(date_value):
         return "Unknown"
 
-    days = (datetime.now() - date).days
+    now_utc = datetime.now(timezone.utc)
+    days = (now_utc - date_value.to_pydatetime()).days
 
     if days <= 90:
         return "🟢 Immediate"
@@ -109,12 +116,11 @@ def freshness_label(date):
     else:
         return "🔵 Long-Term"
 
-# ---------------- ENRICH ----------------
+
 df["Opportunity Stage"] = df["project_stage"].apply(classify_stage)
 df["Recommended Action"] = df["project_stage"].apply(action_text)
 df["Timing"] = df["created_at"].apply(freshness_label)
 
-# ---------------- TOP SIGNALS ----------------
 st.header("🟢 Immediate Opportunity Signals")
 
 top_df = df[df["Opportunity Stage"] == "🟢 Act Now"].head(5)
@@ -124,7 +130,6 @@ for _, row in top_df.iterrows():
         f"{row['project_name']} ({row['project_stage']}) — {row['Recommended Action']}"
     )
 
-# ---------------- MAIN TABLE ----------------
 st.header("Priority Infrastructure Targets")
 
 display_df = df[
@@ -135,24 +140,24 @@ display_df = df[
         "project_stage",
         "Opportunity Stage",
         "Timing",
-        "Recommended Action"
+        "Recommended Action",
     ]
 ]
 
 st.dataframe(display_df, use_container_width=True)
 
-# ---------------- DETAIL ----------------
 st.header("Project Detail")
+
+project_options = df["project_name"].dropna().unique().tolist()
 
 selected = st.selectbox(
     "Select a project",
-    df["project_name"].unique()
+    project_options
 )
 
 detail = df[df["project_name"] == selected].iloc[0]
 
 st.subheader(detail["project_name"])
-
 st.write(f"**Stage:** {detail['project_stage']}")
 st.write(f"**Timing:** {detail['Timing']}")
 st.write(f"**Recommended Action:** {detail['Recommended Action']}")
@@ -160,5 +165,4 @@ st.write(f"**Recommended Action:** {detail['Recommended Action']}")
 st.markdown("### Description")
 st.write(detail["project_description"])
 
-# ---------------- FOOTER ----------------
 st.info("Allen Hammett AI — Infrastructure Intelligence | Confidential Preview")
