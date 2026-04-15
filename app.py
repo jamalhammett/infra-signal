@@ -59,6 +59,16 @@ def run_query(sql: str) -> pd.DataFrame:
     return df
 
 
+st.header("🚨 Active Infrastructure Signals")
+
+st.warning(
+    "LC3 Data Center: Amendment detected in Loudoun County — potential expansion and vendor engagement window."
+)
+
+st.warning(
+    "Data center and industrial signals are being surfaced ahead of traditional procurement visibility."
+)
+
 st.subheader("Platform Health")
 
 health_df = run_query("""
@@ -87,7 +97,7 @@ cross join latest_project lp
 
 st.dataframe(health_df, use_container_width=True)
 
-st.header("High-Value Infrastructure Watchlist")
+st.header("Priority Infrastructure Targets")
 
 watchlist_df = run_query("""
 select
