@@ -1,4 +1,5 @@
 import os
+import re
 
 import pandas as pd
 import psycopg
@@ -53,16 +54,16 @@ def infer_action(project_type: str, project_stage: str, description: str) -> str
         if "approved" in text:
             return "Engage immediately: likely opening for power tools, electrical, safety, and site support procurement."
         if "in review" in text or "pending" in text:
-            return "Early engagement window: map decision-makers and monitor for approval or amendment activity."
+            return "Early engagement window: map decision-makers, distributors, and contractors before approval."
         return "Track closely: potential hyperscale or colocation infrastructure opportunity."
 
     if "substation" in text or "transmission" in text or "utility" in text:
         return "Utility-adjacent opportunity: evaluate electrical infrastructure, field equipment, and contractor access."
 
     if "warehouse" in text or "industrial" in text or "commercial" in text:
-        return "Commercial/industrial lead: identify general contractor, developer, and distributor opportunities."
+        return "Commercial/industrial lead: identify developer, general contractor, and distributor opportunities."
 
-    if "site plan" in text or "engineering plan" in text:
+    if "site plan" in text or "engineering plan" in text or "planning correspondence" in text:
         return "Pre-procurement signal: engage before traditional purchasing visibility."
 
     if "approved" in text:
@@ -93,6 +94,57 @@ def infer_why_it_matters(project_type: str, project_stage: str, description: str
         return "In-review activity creates early access before broader sales teams typically see the opportunity."
 
     return "This record may represent a meaningful early-stage development or land-control signal."
+
+
+def extract_entities(project_name: str, description: str) -> list[str]:
+    """
+    Lightweight entity extraction from project name + description.
+    This is not perfect NLP. It is an operator-friendly first pass to surface
+    likely companies, campuses, projects, and organizations that a BD team can investigate.
+    """
+    text = f"{project_name or ''}. {description or ''}"
+
+    patterns = [
+        r"\b(?:CyrusOne|Cyxtera|QTS|Equinix|Digital Realty|Amazon|AWS|Microsoft|Meta|Google|Compass Datacenters|Vantage|Aligned|Stack Infrastructure|Sabey|CoreSite|NTT|Switch|Cologix|Oracle|Apple)\b",
+        r"\b[A-Z][A-Z0-9&.\- ]{2,}(?:LLC|LP|INC|CORP|CORPORATION|COMPANY|HOLDINGS|VENTURES|GROUP|PARTNERS|PARTNERSHIP)\b",
+        r"\b[A-Z][A-Za-z0-9&.\- ]+(?:Data Center|Datacenter|Campus|Innovation|Substation|Rezoning|Industrial Park|Business Park)\b",
+        r"\b[A-Z]{2,5}-\d{4}-\d{3,5}\b",
+    ]
+
+    found = []
+
+    for pattern in patterns:
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+        for m in matches:
+            value = m.strip()
+            if value and value not in found:
+                found.append(value)
+
+    if project_name and project_name not in found:
+        found.insert(0, project_name)
+
+    cleaned = []
+    seen = set()
+
+    for item in found:
+        item = re.sub(r"\s+", " ", item).strip(" -,:;.")
+        if len(item) < 3:
+            continue
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            cleaned.append(item)
+
+    return cleaned[:10]
+
+
+def build_outreach_note(project_name: str, project_type: str, project_stage: str, county: str, state: str) -> str:
+    return (
+        f"Hi [Name], we are tracking early-stage infrastructure activity in {county}, {state}, "
+        f"including {project_name} ({project_type}, {project_stage}). "
+        f"We believe there may be an upcoming opportunity to support field execution, contractor productivity, "
+        f"and infrastructure build-out. I’d welcome a short conversation to understand where vendor engagement stands."
+    )
 
 
 check_login()
@@ -143,7 +195,7 @@ cross join latest_signal ls
 cross join latest_project lp
 """)
 
-st.dataframe(health_df, use_container_width=True)
+st.dataframe(health_df, use_container_width=True, hide_index=True)
 
 st.header("Priority Infrastructure Targets")
 
@@ -219,14 +271,17 @@ if selected_row is not None:
         st.markdown(f"**Project Type:** {selected_row['project_type']}")
         st.markdown(f"**Stage:** {selected_row['project_stage']}")
         st.markdown(f"**Location:** {selected_row['county']}, {selected_row['state']}")
-        st.markdown(f"**Opportunity Score:** {selected_row['opportunity_score']}")
         st.markdown(f"**Detected / Loaded:** {selected_row['created_at']}")
 
     with col2:
         st.metric("Opportunity Score", int(selected_row["opportunity_score"]))
 
     st.markdown("**Full Description**")
-    st.write(selected_row["description"] if pd.notna(selected_row["description"]) else "No description available.")
+    st.write(
+        selected_row["description"]
+        if pd.notna(selected_row["description"])
+        else "No description available."
+    )
 
     st.markdown("**Why This Matters**")
     st.info(
@@ -245,6 +300,28 @@ if selected_row is not None:
             str(selected_row["description"]),
         )
     )
+
+    st.markdown("**Potential Contacts / Entities**")
+    entities = extract_entities(
+        str(selected_row["canonical_project_name"]),
+        str(selected_row["description"]),
+    )
+
+    if entities:
+        for entity in entities:
+            st.write(f"- {entity}")
+    else:
+        st.write("No likely entities extracted yet.")
+
+    st.markdown("**Suggested Outreach Note**")
+    outreach_note = build_outreach_note(
+        str(selected_row["canonical_project_name"]),
+        str(selected_row["project_type"]),
+        str(selected_row["project_stage"]),
+        str(selected_row["county"]),
+        str(selected_row["state"]),
+    )
+    st.code(outreach_note, language=None)
 
 st.header("Top Priority Opportunities")
 
