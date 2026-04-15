@@ -1,9 +1,9 @@
 import os
-
 import pandas as pd
 import psycopg
 import streamlit as st
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -17,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-
+# ---------------- LOGIN ----------------
 def check_login():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -36,20 +36,15 @@ def check_login():
 
         st.stop()
 
-
 check_login()
 
+# ---------------- HEADER ----------------
 st.title("Infrastructure Intelligence Platform")
 st.caption("Allen Hammett AI — Private Access Preview")
-st.info(
-    "This preview surfaces early-stage land control and infrastructure development signals before traditional procurement visibility."
-)
 
-if not DATABASE_URL:
-    st.error("DATABASE_URL not found")
-    st.stop()
+st.success("🟢 LIVE OPPORTUNITIES: Active infrastructure projects in pre-construction window (0–6 months)")
 
-
+# ---------------- DB QUERY ----------------
 def run_query(sql: str) -> pd.DataFrame:
     conn = psycopg.connect(DATABASE_URL)
     try:
@@ -58,260 +53,109 @@ def run_query(sql: str) -> pd.DataFrame:
         conn.close()
     return df
 
-
-st.subheader("Platform Health")
-
-health_df = run_query("""
-with signal_counts as (
-    select count(*) as signals_count from signals
-),
-project_counts as (
-    select count(*) as projects_count from projects
-),
-latest_signal as (
-    select max(created_at) as latest_signal_at from signals
-),
-latest_project as (
-    select max(created_at) as latest_project_at from projects
-)
-select
-    s.signals_count,
-    p.projects_count,
-    ls.latest_signal_at,
-    lp.latest_project_at
-from signal_counts s
-cross join project_counts p
-cross join latest_signal ls
-cross join latest_project lp
-""")
-
-st.dataframe(health_df, use_container_width=True)
-
-st.header("🚨 Active Infrastructure Signals")
-
-st.warning(
-    "LC3 Data Center (Loudoun): Amendment detected — potential expansion and vendor engagement opportunity."
-)
-
-st.warning(
-    "CyrusOne Data Center: Approved — electrical and infrastructure procurement window likely opening."
-)
-
-st.warning(
-    "Vantage Data Centers (Broad Run): Active development — early contractor positioning opportunity."
-)
-
-st.header("Priority Infrastructure Targets")
-
-watchlist_df = run_query("""
+# ---------------- CORE DATA (FILTERED) ----------------
+df = run_query("""
 select
     case_number,
-    canonical_project_name,
+    project_name,
     project_type,
     project_stage,
-    opportunity_score,
-    county,
-    state,
-    description
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
+    created_at,
+    project_description
+from signals
+where (
+        created_at >= now() - interval '180 days'
+        or project_stage in ('Approved', 'In Review')
+      )
   and (
-        project_type ilike '%industrial%'
-     or project_type ilike '%commercial%'
-     or project_type ilike '%site%'
-     or description ilike '%data center%'
-     or description ilike '%datacenter%'
-     or description ilike '%cloud%'
-     or description ilike '%server%'
-     or description ilike '%substation%'
-     or description ilike '%warehouse%'
+        project_description ilike '%data center%'
+     or project_name ilike '%data center%'
+     or project_description ilike '%substation%'
   )
-order by opportunity_score desc, created_at desc
-limit 50
-""")
-
-st.dataframe(watchlist_df, use_container_width=True)
-
-st.header("Top Priority Opportunities")
-
-top_projects_df = run_query("""
-select
-    case_number,
-    canonical_project_name,
-    project_type,
-    project_stage,
-    opportunity_score,
-    county,
-    state,
-    description
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
-  and project_type not ilike '%Agricultural%'
-order by opportunity_score desc, created_at desc
-limit 50
-""")
-
-st.dataframe(top_projects_df, use_container_width=True)
-
-st.header("Top Landholders")
-
-landholders_df = run_query("""
-select
-    canonical_project_name,
-    count(*) as filings,
-    count(distinct case_number) as unique_cases,
-    min(created_at) as first_seen,
-    max(created_at) as last_seen
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
-group by canonical_project_name
-having count(*) > 1
-order by filings desc, last_seen desc
-limit 50
-""")
-
-st.dataframe(landholders_df, use_container_width=True)
-
-st.header("Approved Pipeline")
-
-approved_df = run_query("""
-select
-    case_number,
-    canonical_project_name,
-    project_type,
-    project_stage,
-    opportunity_score,
-    county,
-    state,
-    description
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
-  and project_stage = 'Approved'
-  and project_type not ilike '%Agricultural%'
-order by opportunity_score desc, created_at desc
-limit 50
-""")
-
-st.dataframe(approved_df, use_container_width=True)
-
-st.header("Active Development Pipeline")
-
-review_df = run_query("""
-select
-    case_number,
-    canonical_project_name,
-    project_type,
-    project_stage,
-    opportunity_score,
-    county,
-    state,
-    description
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
-  and project_stage in ('In Review', 'Pending')
-  and project_type not ilike '%Agricultural%'
-order by opportunity_score desc, created_at desc
-limit 50
-""")
-
-st.dataframe(review_df, use_container_width=True)
-
-st.header("Project Type Breakdown")
-
-project_type_df = run_query("""
-select
-    project_type,
-    count(*) as project_count
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
-group by project_type
-order by project_count desc
-limit 25
-""")
-
-st.dataframe(project_type_df, use_container_width=True)
-
-st.header("Project Stage Breakdown")
-
-project_stage_df = run_query("""
-select
-    project_stage,
-    count(*) as project_count
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
-group by project_stage
-order by project_count desc
-""")
-
-st.dataframe(project_stage_df, use_container_width=True)
-
-st.header("Recent Projects")
-
-recent_projects_df = run_query("""
-select
-    case_number,
-    canonical_project_name,
-    project_type,
-    project_stage,
-    opportunity_score,
-    created_at
-from projects
-where case_number is not null
-  and canonical_project_name <> 'Test Signal'
 order by created_at desc
 limit 100
 """)
 
-st.dataframe(recent_projects_df, use_container_width=True)
+# ---------------- HELPER LOGIC ----------------
+def classify_stage(stage):
+    if stage in ["Approved", "In Review"]:
+        return "🟢 Act Now"
+    elif stage in ["Planning Correspondence"]:
+        return "🟡 Position"
+    else:
+        return "🔵 Track"
 
-with st.expander("Operational Monitoring", expanded=False):
-    st.subheader("Recent Signals")
-    signals_df = run_query("""
-    select
-        case_number,
-        project_name,
-        project_type,
-        project_stage,
-        confidence_score,
-        created_at
-    from signals
-    where case_number is not null
-    order by created_at desc
-    limit 100
-    """)
-    st.dataframe(signals_df, use_container_width=True)
+def action_text(stage):
+    if stage in ["Approved", "In Review"]:
+        return "Engage immediately — vendor selection likely active"
+    elif stage in ["Planning Correspondence"]:
+        return "Build relationship — early positioning phase"
+    else:
+        return "Monitor only — long-term opportunity"
 
-    st.subheader("Recent Source Runs")
-    runs_df = run_query("""
-    select id, status, run_started_at, run_finished_at, records_found, records_inserted
-    from source_runs
-    order by run_started_at desc
-    limit 20
-    """)
-    st.dataframe(runs_df, use_container_width=True)
+def freshness_label(date):
+    if pd.isnull(date):
+        return "Unknown"
 
-    st.subheader("Recent Raw Documents")
-    docs_df = run_query("""
-    select id, document_url, storage_path, fetched_at
-    from raw_documents
-    order by fetched_at desc
-    limit 20
-    """)
-    st.dataframe(docs_df, use_container_width=True)
+    days = (datetime.now() - date).days
 
-    st.subheader("Review Queue")
-    reviews_df = run_query("""
-    select r.id, r.review_status, r.created_at, d.storage_path
-    from raw_snapshot_reviews r
-    left join raw_documents d on r.raw_document_id = d.id
-    order by r.created_at desc
-    limit 20
-    """)
-    st.dataframe(reviews_df, use_container_width=True)
+    if days <= 90:
+        return "🟢 Immediate"
+    elif days <= 180:
+        return "🟡 Near-Term"
+    else:
+        return "🔵 Long-Term"
+
+# ---------------- ENRICH DATA ----------------
+df["Opportunity Stage"] = df["project_stage"].apply(classify_stage)
+df["Recommended Action"] = df["project_stage"].apply(action_text)
+df["Timing"] = df["created_at"].apply(freshness_label)
+
+# ---------------- TOP SIGNALS ----------------
+st.header("🟢 Immediate Opportunity Signals")
+
+top_df = df[df["Opportunity Stage"] == "🟢 Act Now"].head(5)
+
+for _, row in top_df.iterrows():
+    st.success(
+        f"{row['project_name']} ({row['project_stage']}) — {row['Recommended Action']}"
+    )
+
+# ---------------- MAIN TABLE ----------------
+st.header("Priority Infrastructure Targets")
+
+display_df = df[
+    [
+        "case_number",
+        "project_name",
+        "project_type",
+        "project_stage",
+        "Opportunity Stage",
+        "Timing",
+        "Recommended Action"
+    ]
+]
+
+st.dataframe(display_df, use_container_width=True)
+
+# ---------------- DETAIL VIEW ----------------
+st.header("Project Detail")
+
+selected = st.selectbox(
+    "Select a project",
+    df["project_name"].unique()
+)
+
+detail = df[df["project_name"] == selected].iloc[0]
+
+st.subheader(detail["project_name"])
+
+st.write(f"**Stage:** {detail['project_stage']}")
+st.write(f"**Timing:** {detail['Timing']}")
+st.write(f"**Recommended Action:** {detail['Recommended Action']}")
+
+st.markdown("### Description")
+st.write(detail["project_description"])
+
+# ---------------- FOOTER ----------------
+st.info("Allen Hammett AI — Infrastructure Intelligence | Confidential Preview")
