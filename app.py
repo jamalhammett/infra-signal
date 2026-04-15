@@ -15,7 +15,7 @@ else:
 
 st.set_page_config(
     page_title="Infrastructure Intelligence Platform",
-    layout="wide"
+    layout="wide",
 )
 
 
@@ -47,8 +47,87 @@ def run_query(sql: str) -> pd.DataFrame:
     return df
 
 
+def clean_text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def extract_target_account(project_name: str, description: str) -> str:
+    """
+    Try to identify the most likely target account / company / project entity.
+    """
+    project_name = clean_text(project_name)
+    description = clean_text(description)
+
+    known_targets = [
+        "CyrusOne",
+        "Cyxtera",
+        "QTS",
+        "Equinix",
+        "Digital Realty",
+        "Vantage",
+        "Compass Datacenters",
+        "Stack Infrastructure",
+        "Aligned",
+        "CoreSite",
+        "NTT",
+        "Cologix",
+        "Amazon",
+        "AWS",
+        "Microsoft",
+        "Google",
+        "Meta",
+        "Oracle",
+        "Novec",
+        "Dominion",
+        "Intergate",
+        "Belmont",
+        "Brambleton",
+        "Zebra",
+        "LC3",
+    ]
+
+    haystack = f"{project_name} {description}".lower()
+
+    for target in known_targets:
+        if target.lower() in haystack:
+            return target
+
+    if ":" in description:
+        left = description.split(":", 1)[0].strip()
+        if left:
+            return left
+
+    if project_name:
+        return project_name
+
+    return "Unknown"
+
+
+def generate_signal_text(project_name: str, project_type: str, description: str) -> str:
+    text = f"{clean_text(project_name)} {clean_text(project_type)} {clean_text(description)}".lower()
+
+    if "data center" in text or "datacenter" in text:
+        return "Data center development or expansion activity detected"
+    if "substation" in text:
+        return "Power infrastructure expansion signal detected"
+    if "warehouse" in text:
+        return "Industrial / logistics development signal detected"
+    if "engineering plan" in text:
+        return "Engineering-stage infrastructure activity detected"
+    if "planning correspondence" in text:
+        return "Pre-procurement planning signal detected"
+    if "performance bond" in text:
+        return "Execution-stage project bonding signal detected"
+    if "legislative application" in text or "rezoning" in text:
+        return "Entitlement / rezoning activity detected"
+
+    return "General infrastructure activity detected"
+
+
 def infer_action(project_type: str, project_stage: str, description: str) -> str:
-    text = f"{project_type or ''} {project_stage or ''} {description or ''}".lower()
+    text = f"{clean_text(project_type)} {clean_text(project_stage)} {clean_text(description)}".lower()
 
     if "data center" in text or "datacenter" in text:
         if "approved" in text:
@@ -58,13 +137,16 @@ def infer_action(project_type: str, project_stage: str, description: str) -> str
         return "Track closely: potential hyperscale or colocation infrastructure opportunity."
 
     if "substation" in text or "transmission" in text or "utility" in text:
-        return "Utility-adjacent opportunity: evaluate electrical infrastructure, field equipment, and contractor access."
+        return "Engage utilities, EPC firms, and electrical contractors around field execution and infrastructure support."
 
     if "warehouse" in text or "industrial" in text or "commercial" in text:
-        return "Commercial/industrial lead: identify developer, general contractor, and distributor opportunities."
+        return "Identify developer, general contractor, and local distributor opportunities."
 
-    if "site plan" in text or "engineering plan" in text or "planning correspondence" in text:
+    if "site" in text or "engineering plan" in text or "planning correspondence" in text:
         return "Pre-procurement signal: engage before traditional purchasing visibility."
+
+    if "performance bond" in text:
+        return "Execution-stage signal: contractor activity is closer to spend and field mobilization."
 
     if "approved" in text:
         return "Approved project: vendor conversations likely becoming actionable."
@@ -76,7 +158,7 @@ def infer_action(project_type: str, project_stage: str, description: str) -> str
 
 
 def infer_why_it_matters(project_type: str, project_stage: str, description: str) -> str:
-    text = f"{project_type or ''} {project_stage or ''} {description or ''}".lower()
+    text = f"{clean_text(project_type)} {clean_text(project_stage)} {clean_text(description)}".lower()
 
     if "data center" in text or "datacenter" in text:
         return "Data center projects drive large-scale demand for tools, electrical infrastructure support, safety equipment, and contractor relationships."
@@ -86,6 +168,9 @@ def infer_why_it_matters(project_type: str, project_stage: str, description: str
 
     if "warehouse" in text or "industrial" in text:
         return "Industrial projects can create repeat demand across site prep, build-out, maintenance, and contractor supply channels."
+
+    if "performance bond" in text:
+        return "Performance bond activity often indicates a project is moving closer to execution and real spend."
 
     if "approved" in text:
         return "Approved status usually means the project is further along and closer to vendor engagement."
@@ -97,18 +182,13 @@ def infer_why_it_matters(project_type: str, project_stage: str, description: str
 
 
 def extract_entities(project_name: str, description: str) -> list[str]:
-    """
-    Lightweight entity extraction from project name + description.
-    This is not perfect NLP. It is an operator-friendly first pass to surface
-    likely companies, campuses, projects, and organizations that a BD team can investigate.
-    """
-    text = f"{project_name or ''}. {description or ''}"
+    text = f"{clean_text(project_name)}. {clean_text(description)}"
 
     patterns = [
-        r"\b(?:CyrusOne|Cyxtera|QTS|Equinix|Digital Realty|Amazon|AWS|Microsoft|Meta|Google|Compass Datacenters|Vantage|Aligned|Stack Infrastructure|Sabey|CoreSite|NTT|Switch|Cologix|Oracle|Apple)\b",
+        r"\b(?:CyrusOne|Cyxtera|QTS|Equinix|Digital Realty|Amazon|AWS|Microsoft|Meta|Google|Compass Datacenters|Vantage|Aligned|Stack Infrastructure|Sabey|CoreSite|NTT|Switch|Cologix|Oracle|Apple|Novec|Dominion)\b",
         r"\b[A-Z][A-Z0-9&.\- ]{2,}(?:LLC|LP|INC|CORP|CORPORATION|COMPANY|HOLDINGS|VENTURES|GROUP|PARTNERS|PARTNERSHIP)\b",
         r"\b[A-Z][A-Za-z0-9&.\- ]+(?:Data Center|Datacenter|Campus|Innovation|Substation|Rezoning|Industrial Park|Business Park)\b",
-        r"\b[A-Z]{2,5}-\d{4}-\d{3,5}\b",
+        r"\b[A-Z]{2,6}-\d{4}-\d{3,5}\b",
     ]
 
     found = []
@@ -138,12 +218,21 @@ def extract_entities(project_name: str, description: str) -> list[str]:
     return cleaned[:10]
 
 
-def build_outreach_note(project_name: str, project_type: str, project_stage: str, county: str, state: str) -> str:
+def build_outreach_note(
+    target_account: str,
+    project_name: str,
+    project_type: str,
+    project_stage: str,
+    county: str,
+    state: str,
+) -> str:
     return (
         f"Hi [Name], we are tracking early-stage infrastructure activity in {county}, {state}, "
-        f"including {project_name} ({project_type}, {project_stage}). "
-        f"We believe there may be an upcoming opportunity to support field execution, contractor productivity, "
-        f"and infrastructure build-out. I’d welcome a short conversation to understand where vendor engagement stands."
+        f"including {project_name} tied to {target_account} "
+        f"({project_type}, {project_stage}). "
+        f"We believe there may be an opportunity to support field execution, contractor productivity, "
+        f"electrical infrastructure work, and site build-out. "
+        f"I’d welcome a short conversation to understand where vendor engagement stands."
     )
 
 
@@ -160,11 +249,9 @@ if not DATABASE_URL:
     st.stop()
 
 st.header("🚨 Active Infrastructure Signals")
-
 st.warning(
     "LC3 Data Center: Amendment detected in Loudoun County — potential expansion and vendor engagement window."
 )
-
 st.warning(
     "Data center and industrial signals are being surfaced ahead of traditional procurement visibility."
 )
@@ -219,12 +306,19 @@ where case_number is not null
      or project_type ilike '%site%'
      or project_type ilike '%engineering%'
      or project_type ilike '%planning%'
+     or project_type ilike '%performance bond%'
+     or project_type ilike '%legislative%'
      or description ilike '%data center%'
      or description ilike '%datacenter%'
      or description ilike '%cloud%'
      or description ilike '%server%'
      or description ilike '%substation%'
      or description ilike '%warehouse%'
+     or canonical_project_name ilike '%data center%'
+     or canonical_project_name ilike '%datacenter%'
+     or canonical_project_name ilike '%cyrusone%'
+     or canonical_project_name ilike '%vantage%'
+     or canonical_project_name ilike '%intergate%'
   )
 order by opportunity_score desc, created_at desc
 limit 50
@@ -261,52 +355,57 @@ else:
         selected_row = watchlist_df.iloc[0]
 
 if selected_row is not None:
+    project_name = clean_text(selected_row["canonical_project_name"])
+    project_type = clean_text(selected_row["project_type"])
+    project_stage = clean_text(selected_row["project_stage"])
+    description = clean_text(selected_row["description"])
+    county = clean_text(selected_row["county"])
+    state = clean_text(selected_row["state"])
+    case_number = clean_text(selected_row["case_number"])
+    created_at = selected_row["created_at"]
+    opportunity_score = int(selected_row["opportunity_score"])
+
+    target_account = extract_target_account(project_name, description)
+    signal_text = generate_signal_text(project_name, project_type, description)
+    why_it_matters = infer_why_it_matters(project_type, project_stage, description)
+    action_text = infer_action(project_type, project_stage, description)
+    entities = extract_entities(project_name, description)
+    outreach_note = build_outreach_note(
+        target_account=target_account,
+        project_name=project_name,
+        project_type=project_type,
+        project_stage=project_stage,
+        county=county,
+        state=state,
+    )
+
     st.subheader("Selected Target Detail")
 
-    col1, col2 = st.columns([2, 1])
+    c1, c2 = st.columns([2, 1])
 
-    with col1:
-        st.markdown(f"**Project Name:** {selected_row['canonical_project_name']}")
-        st.markdown(f"**Case Number:** {selected_row['case_number']}")
-        st.markdown(f"**Project Type:** {selected_row['project_type']}")
-        st.markdown(f"**Stage:** {selected_row['project_stage']}")
-        st.markdown(f"**Location:** {selected_row['county']}, {selected_row['state']}")
-        st.markdown(f"**Detected / Loaded:** {selected_row['created_at']}")
+    with c1:
+        st.markdown(f"**🎯 Target Account:** {target_account}")
+        st.markdown(f"**🏗 Project:** {project_name}")
+        st.markdown(f"**📁 Case Number:** {case_number}")
+        st.markdown(f"**📡 Signal:** {signal_text}")
+        st.markdown(f"**📍 Location:** {county}, {state}")
+        st.markdown(f"**🧱 Project Type:** {project_type}")
+        st.markdown(f"**🚦 Stage:** {project_stage}")
+        st.markdown(f"**🕒 Loaded:** {created_at}")
 
-    with col2:
-        st.metric("Opportunity Score", int(selected_row["opportunity_score"]))
+    with c2:
+        st.metric("Opportunity Score", opportunity_score)
 
     st.markdown("**Full Description**")
-    st.write(
-        selected_row["description"]
-        if pd.notna(selected_row["description"])
-        else "No description available."
-    )
+    st.write(description if description else "No description available.")
 
     st.markdown("**Why This Matters**")
-    st.info(
-        infer_why_it_matters(
-            str(selected_row["project_type"]),
-            str(selected_row["project_stage"]),
-            str(selected_row["description"]),
-        )
-    )
+    st.info(why_it_matters)
 
     st.markdown("**Recommended Action**")
-    st.success(
-        infer_action(
-            str(selected_row["project_type"]),
-            str(selected_row["project_stage"]),
-            str(selected_row["description"]),
-        )
-    )
+    st.success(action_text)
 
     st.markdown("**Potential Contacts / Entities**")
-    entities = extract_entities(
-        str(selected_row["canonical_project_name"]),
-        str(selected_row["description"]),
-    )
-
     if entities:
         for entity in entities:
             st.write(f"- {entity}")
@@ -314,13 +413,6 @@ if selected_row is not None:
         st.write("No likely entities extracted yet.")
 
     st.markdown("**Suggested Outreach Note**")
-    outreach_note = build_outreach_note(
-        str(selected_row["canonical_project_name"]),
-        str(selected_row["project_type"]),
-        str(selected_row["project_stage"]),
-        str(selected_row["county"]),
-        str(selected_row["state"]),
-    )
     st.code(outreach_note, language=None)
 
 st.header("Top Priority Opportunities")
