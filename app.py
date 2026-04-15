@@ -1,5 +1,4 @@
 import os
-from datetime import datetime, timezone
 
 import pandas as pd
 import psycopg
@@ -81,40 +80,52 @@ order by created_at desc
 limit 100
 """)
 
+# Safely normalize timestamps to UTC
 df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
 
 
 def classify_stage(stage: str) -> str:
+    stage = (stage or "").strip()
+
     if stage in ["Approved", "In Review"]:
         return "🟢 Act Now"
-    elif stage in ["Planning Correspondence"]:
+    if stage == "Planning Correspondence":
         return "🟡 Position"
-    else:
-        return "🔵 Track"
+    return "🔵 Track"
 
 
 def action_text(stage: str) -> str:
+    stage = (stage or "").strip()
+
     if stage in ["Approved", "In Review"]:
         return "Engage immediately — vendor selection likely active"
-    elif stage in ["Planning Correspondence"]:
+    if stage == "Planning Correspondence":
         return "Build relationship — early positioning phase"
-    else:
-        return "Monitor only — long-term opportunity"
+    return "Monitor only — long-term opportunity"
 
 
 def freshness_label(date_value) -> str:
     if pd.isnull(date_value):
         return "Unknown"
 
-    now_utc = datetime.now(timezone.utc)
-    days = (now_utc - date_value.to_pydatetime()).days
+    try:
+        ts = pd.Timestamp(date_value)
 
-    if days <= 90:
-        return "🟢 Immediate"
-    elif days <= 180:
-        return "🟡 Near-Term"
-    else:
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+
+        now_utc = pd.Timestamp.now(tz="UTC")
+        days = (now_utc - ts).days
+
+        if days <= 90:
+            return "🟢 Immediate"
+        if days <= 180:
+            return "🟡 Near-Term"
         return "🔵 Long-Term"
+    except Exception:
+        return "Unknown"
 
 
 df["Opportunity Stage"] = df["project_stage"].apply(classify_stage)
@@ -125,10 +136,17 @@ st.header("🟢 Immediate Opportunity Signals")
 
 top_df = df[df["Opportunity Stage"] == "🟢 Act Now"].head(5)
 
-for _, row in top_df.iterrows():
-    st.success(
-        f"{row['project_name']} ({row['project_stage']}) — {row['Recommended Action']}"
-    )
+if top_df.empty:
+    st.info("No immediate opportunities found in the current filtered set.")
+else:
+    for _, row in top_df.iterrows():
+        project_name = row.get("project_name", "Unknown Project")
+        project_stage = row.get("project_stage", "Unknown Stage")
+        recommended_action = row.get("Recommended Action", "Review project")
+
+        st.success(
+            f"{project_name} ({project_stage}) — {recommended_action}"
+        )
 
 st.header("Priority Infrastructure Targets")
 
@@ -142,27 +160,33 @@ display_df = df[
         "Timing",
         "Recommended Action",
     ]
-]
+].copy()
 
 st.dataframe(display_df, use_container_width=True)
 
 st.header("Project Detail")
 
-project_options = df["project_name"].dropna().unique().tolist()
-
-selected = st.selectbox(
-    "Select a project",
-    project_options
+project_options = (
+    df["project_name"]
+    .dropna()
+    .astype(str)
+    .unique()
+    .tolist()
 )
 
-detail = df[df["project_name"] == selected].iloc[0]
+if not project_options:
+    st.info("No projects available for detail view.")
+else:
+    selected = st.selectbox("Select a project", project_options)
 
-st.subheader(detail["project_name"])
-st.write(f"**Stage:** {detail['project_stage']}")
-st.write(f"**Timing:** {detail['Timing']}")
-st.write(f"**Recommended Action:** {detail['Recommended Action']}")
+    detail = df[df["project_name"] == selected].iloc[0]
 
-st.markdown("### Description")
-st.write(detail["project_description"])
+    st.subheader(str(detail.get("project_name", "Unknown Project")))
+    st.write(f"**Stage:** {detail.get('project_stage', 'Unknown')}")
+    st.write(f"**Timing:** {detail.get('Timing', 'Unknown')}")
+    st.write(f"**Recommended Action:** {detail.get('Recommended Action', 'Review manually')}")
+
+    st.markdown("### Description")
+    st.write(detail.get("project_description", ""))
 
 st.info("Allen Hammett AI — Infrastructure Intelligence | Confidential Preview")
