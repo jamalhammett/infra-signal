@@ -53,7 +53,7 @@ def run_query(sql: str) -> pd.DataFrame:
         conn.close()
     return df
 
-# ---------------- CORE DATA (FILTERED) ----------------
+# ---------------- CORE DATA ----------------
 df = run_query("""
 select
     case_number,
@@ -76,7 +76,10 @@ order by created_at desc
 limit 100
 """)
 
-# ---------------- HELPER LOGIC ----------------
+# 🔥 FIX: Convert created_at to datetime
+df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+
+# ---------------- LOGIC ----------------
 def classify_stage(stage):
     if stage in ["Approved", "In Review"]:
         return "🟢 Act Now"
@@ -106,7 +109,7 @@ def freshness_label(date):
     else:
         return "🔵 Long-Term"
 
-# ---------------- ENRICH DATA ----------------
+# ---------------- ENRICH ----------------
 df["Opportunity Stage"] = df["project_stage"].apply(classify_stage)
 df["Recommended Action"] = df["project_stage"].apply(action_text)
 df["Timing"] = df["created_at"].apply(freshness_label)
@@ -138,7 +141,7 @@ display_df = df[
 
 st.dataframe(display_df, use_container_width=True)
 
-# ---------------- DETAIL VIEW ----------------
+# ---------------- DETAIL ----------------
 st.header("Project Detail")
 
 selected = st.selectbox(
