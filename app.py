@@ -37,6 +37,64 @@ def check_login():
         st.stop()
 
 
+def run_query(sql: str) -> pd.DataFrame:
+    conn = psycopg.connect(DATABASE_URL)
+    try:
+        df = pd.read_sql(sql, conn)
+    finally:
+        conn.close()
+    return df
+
+
+def infer_action(project_type: str, project_stage: str, description: str) -> str:
+    text = f"{project_type or ''} {project_stage or ''} {description or ''}".lower()
+
+    if "data center" in text or "datacenter" in text:
+        if "approved" in text:
+            return "Engage immediately: likely opening for power tools, electrical, safety, and site support procurement."
+        if "in review" in text or "pending" in text:
+            return "Early engagement window: map decision-makers and monitor for approval or amendment activity."
+        return "Track closely: potential hyperscale or colocation infrastructure opportunity."
+
+    if "substation" in text or "transmission" in text or "utility" in text:
+        return "Utility-adjacent opportunity: evaluate electrical infrastructure, field equipment, and contractor access."
+
+    if "warehouse" in text or "industrial" in text or "commercial" in text:
+        return "Commercial/industrial lead: identify general contractor, developer, and distributor opportunities."
+
+    if "site plan" in text or "engineering plan" in text:
+        return "Pre-procurement signal: engage before traditional purchasing visibility."
+
+    if "approved" in text:
+        return "Approved project: vendor conversations likely becoming actionable."
+
+    if "in review" in text or "pending" in text:
+        return "Monitor actively: this may move into procurement once approvals clear."
+
+    return "Review manually: signal is relevant, but next action needs qualification."
+
+
+def infer_why_it_matters(project_type: str, project_stage: str, description: str) -> str:
+    text = f"{project_type or ''} {project_stage or ''} {description or ''}".lower()
+
+    if "data center" in text or "datacenter" in text:
+        return "Data center projects drive large-scale demand for tools, electrical infrastructure support, safety equipment, and contractor relationships."
+
+    if "substation" in text or "utility" in text or "transmission" in text:
+        return "Power infrastructure signals often indicate adjacent construction and field-equipment demand."
+
+    if "warehouse" in text or "industrial" in text:
+        return "Industrial projects can create repeat demand across site prep, build-out, maintenance, and contractor supply channels."
+
+    if "approved" in text:
+        return "Approved status usually means the project is further along and closer to vendor engagement."
+
+    if "in review" in text or "pending" in text:
+        return "In-review activity creates early access before broader sales teams typically see the opportunity."
+
+    return "This record may represent a meaningful early-stage development or land-control signal."
+
+
 check_login()
 
 st.title("Infrastructure Intelligence Platform")
@@ -48,16 +106,6 @@ st.info(
 if not DATABASE_URL:
     st.error("DATABASE_URL not found")
     st.stop()
-
-
-def run_query(sql: str) -> pd.DataFrame:
-    conn = psycopg.connect(DATABASE_URL)
-    try:
-        df = pd.read_sql(sql, conn)
-    finally:
-        conn.close()
-    return df
-
 
 st.header("🚨 Active Infrastructure Signals")
 
@@ -108,7 +156,8 @@ select
     opportunity_score,
     county,
     state,
-    description
+    description,
+    created_at
 from projects
 where case_number is not null
   and canonical_project_name <> 'Test Signal'
@@ -116,6 +165,8 @@ where case_number is not null
         project_type ilike '%industrial%'
      or project_type ilike '%commercial%'
      or project_type ilike '%site%'
+     or project_type ilike '%engineering%'
+     or project_type ilike '%planning%'
      or description ilike '%data center%'
      or description ilike '%datacenter%'
      or description ilike '%cloud%'
@@ -127,7 +178,73 @@ order by opportunity_score desc, created_at desc
 limit 50
 """)
 
-st.dataframe(watchlist_df, use_container_width=True)
+display_watchlist_df = watchlist_df[
+    [
+        "case_number",
+        "canonical_project_name",
+        "project_type",
+        "project_stage",
+        "opportunity_score",
+        "county",
+        "state",
+    ]
+].copy()
+
+selection = st.dataframe(
+    display_watchlist_df,
+    use_container_width=True,
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row",
+    key="watchlist_table",
+)
+
+selected_row = None
+selected_indices = selection.selection.rows if selection and selection.selection else []
+
+if selected_indices:
+    selected_row = watchlist_df.iloc[selected_indices[0]]
+else:
+    if not watchlist_df.empty:
+        selected_row = watchlist_df.iloc[0]
+
+if selected_row is not None:
+    st.subheader("Selected Target Detail")
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown(f"**Project Name:** {selected_row['canonical_project_name']}")
+        st.markdown(f"**Case Number:** {selected_row['case_number']}")
+        st.markdown(f"**Project Type:** {selected_row['project_type']}")
+        st.markdown(f"**Stage:** {selected_row['project_stage']}")
+        st.markdown(f"**Location:** {selected_row['county']}, {selected_row['state']}")
+        st.markdown(f"**Opportunity Score:** {selected_row['opportunity_score']}")
+        st.markdown(f"**Detected / Loaded:** {selected_row['created_at']}")
+
+    with col2:
+        st.metric("Opportunity Score", int(selected_row["opportunity_score"]))
+
+    st.markdown("**Full Description**")
+    st.write(selected_row["description"] if pd.notna(selected_row["description"]) else "No description available.")
+
+    st.markdown("**Why This Matters**")
+    st.info(
+        infer_why_it_matters(
+            str(selected_row["project_type"]),
+            str(selected_row["project_stage"]),
+            str(selected_row["description"]),
+        )
+    )
+
+    st.markdown("**Recommended Action**")
+    st.success(
+        infer_action(
+            str(selected_row["project_type"]),
+            str(selected_row["project_stage"]),
+            str(selected_row["description"]),
+        )
+    )
 
 st.header("Top Priority Opportunities")
 
@@ -149,7 +266,7 @@ order by opportunity_score desc, created_at desc
 limit 50
 """)
 
-st.dataframe(top_projects_df, use_container_width=True)
+st.dataframe(top_projects_df, use_container_width=True, hide_index=True)
 
 st.header("Top Landholders")
 
@@ -169,7 +286,7 @@ order by filings desc, last_seen desc
 limit 50
 """)
 
-st.dataframe(landholders_df, use_container_width=True)
+st.dataframe(landholders_df, use_container_width=True, hide_index=True)
 
 st.header("Approved Pipeline")
 
@@ -192,7 +309,7 @@ order by opportunity_score desc, created_at desc
 limit 50
 """)
 
-st.dataframe(approved_df, use_container_width=True)
+st.dataframe(approved_df, use_container_width=True, hide_index=True)
 
 st.header("Active Development Pipeline")
 
@@ -215,7 +332,7 @@ order by opportunity_score desc, created_at desc
 limit 50
 """)
 
-st.dataframe(review_df, use_container_width=True)
+st.dataframe(review_df, use_container_width=True, hide_index=True)
 
 st.header("Project Type Breakdown")
 
@@ -231,7 +348,7 @@ order by project_count desc
 limit 25
 """)
 
-st.dataframe(project_type_df, use_container_width=True)
+st.dataframe(project_type_df, use_container_width=True, hide_index=True)
 
 st.header("Project Stage Breakdown")
 
@@ -246,7 +363,7 @@ group by project_stage
 order by project_count desc
 """)
 
-st.dataframe(project_stage_df, use_container_width=True)
+st.dataframe(project_stage_df, use_container_width=True, hide_index=True)
 
 st.header("Recent Projects")
 
@@ -265,7 +382,7 @@ order by created_at desc
 limit 100
 """)
 
-st.dataframe(recent_projects_df, use_container_width=True)
+st.dataframe(recent_projects_df, use_container_width=True, hide_index=True)
 
 with st.expander("Operational Monitoring", expanded=False):
     st.subheader("Recent Signals")
@@ -282,7 +399,7 @@ with st.expander("Operational Monitoring", expanded=False):
     order by created_at desc
     limit 100
     """)
-    st.dataframe(signals_df, use_container_width=True)
+    st.dataframe(signals_df, use_container_width=True, hide_index=True)
 
     st.subheader("Recent Source Runs")
     runs_df = run_query("""
@@ -291,7 +408,7 @@ with st.expander("Operational Monitoring", expanded=False):
     order by run_started_at desc
     limit 20
     """)
-    st.dataframe(runs_df, use_container_width=True)
+    st.dataframe(runs_df, use_container_width=True, hide_index=True)
 
     st.subheader("Recent Raw Documents")
     docs_df = run_query("""
@@ -300,7 +417,7 @@ with st.expander("Operational Monitoring", expanded=False):
     order by fetched_at desc
     limit 20
     """)
-    st.dataframe(docs_df, use_container_width=True)
+    st.dataframe(docs_df, use_container_width=True, hide_index=True)
 
     st.subheader("Review Queue")
     reviews_df = run_query("""
@@ -310,4 +427,4 @@ with st.expander("Operational Monitoring", expanded=False):
     order by r.created_at desc
     limit 20
     """)
-    st.dataframe(reviews_df, use_container_width=True)
+    st.dataframe(reviews_df, use_container_width=True, hide_index=True)
