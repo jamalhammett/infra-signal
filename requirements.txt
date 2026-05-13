@@ -3,5 +3,3 @@ pandas
 requests
 python-dotenv
 psycopg[binary]
-psycopg2-binary
-httpx
