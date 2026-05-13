@@ -1,5 +1,6 @@
 import os
 import re
+import subprocess
 
 import pandas as pd
 import psycopg
@@ -221,6 +222,37 @@ def login_screen():
 
 
 # =========================
+# ADMIN REFRESH CONTROLS
+# =========================
+def admin_refresh_controls(role):
+    if role != "admin":
+        return
+
+    st.sidebar.header("Admin Controls")
+
+    if st.sidebar.button("Refresh Infrastructure Signals"):
+        st.sidebar.info("Refresh started...")
+
+        try:
+            subprocess.run(
+                ["python", "scripts/generate_signals_from_api.py"],
+                check=True,
+                timeout=180
+            )
+
+            subprocess.run(
+                ["python", "scripts/promote_signals_to_projects.py"],
+                check=True,
+                timeout=180
+            )
+
+            st.sidebar.success("Signals refreshed. Refresh the page.")
+        except Exception as e:
+            st.sidebar.error("Refresh failed.")
+            st.sidebar.code(str(e))
+
+
+# =========================
 # SAFETY CHECKS
 # =========================
 if not DATABASE_URL:
@@ -236,6 +268,8 @@ handle_password_recovery()
 
 user = login_screen()
 role = user["role"]
+
+admin_refresh_controls(role)
 
 st.title("Infrastructure Intelligence Platform")
 st.caption(f"Allen Hammett AI — Private Access Preview | {user.get('company', '')}")
