@@ -233,20 +233,35 @@ def admin_refresh_controls(role):
     if st.sidebar.button("Refresh Infrastructure Signals"):
         st.sidebar.info("Refresh started...")
 
+        env = os.environ.copy()
+        env["DATABASE_URL"] = DATABASE_URL
+
         try:
-            subprocess.run(
+            result1 = subprocess.run(
                 ["python", "scripts/generate_signals_from_api.py"],
                 check=True,
-                timeout=180
+                timeout=180,
+                capture_output=True,
+                text=True,
+                env=env
             )
 
-            subprocess.run(
+            result2 = subprocess.run(
                 ["python", "scripts/promote_signals_to_projects.py"],
                 check=True,
-                timeout=180
+                timeout=180,
+                capture_output=True,
+                text=True,
+                env=env
             )
 
             st.sidebar.success("Signals refreshed. Refresh the page.")
+            st.sidebar.code(result1.stdout + "\n" + result2.stdout)
+
+        except subprocess.CalledProcessError as e:
+            st.sidebar.error("Refresh failed.")
+            st.sidebar.code((e.stdout or "") + "\n" + (e.stderr or ""))
+
         except Exception as e:
             st.sidebar.error("Refresh failed.")
             st.sidebar.code(str(e))
