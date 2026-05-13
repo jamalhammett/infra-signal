@@ -19,6 +19,9 @@ st.set_page_config(
 )
 
 
+# =========================
+# DATABASE
+# =========================
 def run_query(sql: str, params=None) -> pd.DataFrame:
     conn = psycopg.connect(DATABASE_URL)
     try:
@@ -27,6 +30,9 @@ def run_query(sql: str, params=None) -> pd.DataFrame:
         conn.close()
 
 
+# =========================
+# SUPABASE AUTH
+# =========================
 def authenticate_user(email: str, password: str):
     url = f"{SUPABASE_URL}/auth/v1/token?grant_type=password"
     headers = {
@@ -47,6 +53,43 @@ def authenticate_user(email: str, password: str):
     return response.json()
 
 
+def send_password_recovery(email: str):
+    url = f"{SUPABASE_URL}/auth/v1/recover"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "email": email,
+        "redirect_to": "https://infra-signal.streamlit.app/"
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        return response.status_code in [200, 204]
+    except Exception:
+        return False
+
+
+def update_password_with_token(access_token: str, new_password: str):
+    url = f"{SUPABASE_URL}/auth/v1/user"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {"password": new_password}
+
+    try:
+        response = requests.put(url, headers=headers, json=payload, timeout=20)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 def get_user_profile(email: str):
     df = run_query(
         """
@@ -64,6 +107,51 @@ def get_user_profile(email: str):
     return df.iloc[0].to_dict()
 
 
+def handle_password_recovery():
+    params = st.query_params
+
+    access_token = params.get("access_token", None)
+    recovery_type = params.get("type", None)
+
+    if isinstance(access_token, list):
+        access_token = access_token[0]
+
+    if isinstance(recovery_type, list):
+        recovery_type = recovery_type[0]
+
+    if recovery_type == "recovery" and access_token:
+        st.title("Reset Your Password")
+        st.caption("Allen Hammett AI — Secure Access Recovery")
+
+        new_password = st.text_input("New Password", type="password")
+        confirm_password = st.text_input("Confirm New Password", type="password")
+
+        if st.button("Update Password"):
+            if not new_password or not confirm_password:
+                st.error("Enter and confirm your new password.")
+                st.stop()
+
+            if new_password != confirm_password:
+                st.error("Passwords do not match.")
+                st.stop()
+
+            if len(new_password) < 10:
+                st.error("Password must be at least 10 characters.")
+                st.stop()
+
+            updated = update_password_with_token(access_token, new_password)
+
+            if updated:
+                st.success("Password updated. You can now sign in.")
+                st.query_params.clear()
+                st.stop()
+            else:
+                st.error("Password update failed. Request a new reset link.")
+                st.stop()
+
+        st.stop()
+
+
 def login_screen():
     if "user" not in st.session_state:
         st.session_state.user = None
@@ -74,46 +162,67 @@ def login_screen():
     st.title("Allen Hammett AI")
     st.subheader("Private Infrastructure Intelligence Access")
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    tab1, tab2 = st.tabs(["Sign In", "Forgot Password"])
 
-    if st.button("Sign In"):
-        if not email or not password:
-            st.error("Enter email and password.")
-            st.stop()
+    with tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
 
-        auth_result = authenticate_user(email.strip(), password)
-
-        if not auth_result:
-            st.error("Invalid login.")
-            st.stop()
-
-        profile = get_user_profile(email.strip().lower())
-
-        if not profile:
-            st.error("Your account exists, but access has not been approved.")
-            st.stop()
-
-        if profile["access_status"] != "active":
-            st.error("Your access is not active.")
-            st.stop()
-
-        expires_at = profile.get("access_expires_at")
-
-        if expires_at is not None:
-            expires_at = pd.to_datetime(expires_at, utc=True)
-            now_utc = pd.Timestamp.now(tz="UTC")
-
-            if expires_at < now_utc:
-                st.error("Your preview access has expired. Contact Allen Hammett Inc to continue access.")
+        if st.button("Sign In"):
+            if not email or not password:
+                st.error("Enter email and password.")
                 st.stop()
 
-        st.session_state.user = profile
-        st.rerun()
+            auth_result = authenticate_user(email.strip().lower(), password)
+
+            if not auth_result:
+                st.error("Invalid login.")
+                st.stop()
+
+            profile = get_user_profile(email.strip().lower())
+
+            if not profile:
+                st.error("Your account exists, but access has not been approved.")
+                st.stop()
+
+            if profile["access_status"] != "active":
+                st.error("Your access is not active.")
+                st.stop()
+
+            expires_at = profile.get("access_expires_at")
+
+            if expires_at is not None:
+                expires_at = pd.to_datetime(expires_at, utc=True)
+                now_utc = pd.Timestamp.now(tz="UTC")
+
+                if expires_at < now_utc:
+                    st.error("Your preview access has expired. Contact Allen Hammett Inc to continue access.")
+                    st.stop()
+
+            st.session_state.user = profile
+            st.rerun()
+
+    with tab2:
+        recovery_email = st.text_input("Account Email", key="recovery_email")
+
+        if st.button("Send Password Reset Link"):
+            if not recovery_email:
+                st.error("Enter your email.")
+                st.stop()
+
+            sent = send_password_recovery(recovery_email.strip().lower())
+
+            if sent:
+                st.success("Password reset email sent. Check your inbox.")
+            else:
+                st.error("Could not send reset email.")
 
     st.stop()
 
 
+# =========================
+# SAFETY CHECKS
+# =========================
 if not DATABASE_URL:
     st.error("DATABASE_URL not found.")
     st.stop()
@@ -123,6 +232,8 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
     st.stop()
 
 
+handle_password_recovery()
+
 user = login_screen()
 role = user["role"]
 
@@ -131,6 +242,9 @@ st.caption(f"Allen Hammett AI — Private Access Preview | {user.get('company', 
 st.success("🟢 Action-only mode: showing prioritized infrastructure targets with BD guidance.")
 
 
+# =========================
+# HELPERS
+# =========================
 def clean_text(value) -> str:
     if value is None or pd.isnull(value):
         return ""
@@ -369,26 +483,29 @@ def why_this_matters(row):
 
 
 def recommended_move(row):
-    role = clean_text(row["Target Role"]).lower()
+    role_value = clean_text(row["Target Role"]).lower()
 
-    if "utility" in role:
+    if "utility" in role_value:
         return "Approach power and site-infrastructure stakeholders around site readiness, contractor activity, and field support needs."
 
-    if "general contractor" in role or "construction manager" in role:
+    if "general contractor" in role_value or "construction manager" in role_value:
         return "Reach the GC / CM now to position DeWalt as the jobsite standard before mobilization accelerates."
 
-    if "developer / project delivery lead" in role:
+    if "developer / project delivery lead" in role_value:
         return "Approach developer-side project delivery leadership now to map procurement timing and identify execution partners."
 
-    if "developer / design team" in role:
+    if "developer / design team" in role_value:
         return "Begin early relationship-building with the development/design team before final execution partners are locked."
 
-    if "developer / real estate lead" in role:
+    if "developer / real estate lead" in role_value:
         return "Treat this as strategic account mapping and identify when the project moves from land control into execution."
 
     return "Use this signal to identify the delivery-side decision path before competitors establish the relationship."
 
 
+# =========================
+# DATA LOAD
+# =========================
 df = run_query("""
 select
     case_number,
@@ -476,6 +593,10 @@ elif role == "executive_full":
 elif role == "admin":
     pass
 
+
+# =========================
+# DASHBOARD
+# =========================
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Act Now Targets", len(act_now_df))
 col2.metric("Position Early Targets", len(position_df))
