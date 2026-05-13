@@ -3,7 +3,7 @@ import re
 import subprocess
 
 import pandas as pd
-import psycopg
+import psycopg2 as psycopg
 import requests
 import streamlit as st
 from dotenv import load_dotenv
