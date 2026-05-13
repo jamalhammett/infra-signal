@@ -3,15 +3,15 @@ import re
 
 import pandas as pd
 import psycopg
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
 
-if "DATABASE_URL" in st.secrets:
-    DATABASE_URL = st.secrets["DATABASE_URL"]
-else:
-    DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY", os.getenv("SUPABASE_ANON_KEY"))
 
 st.set_page_config(
     page_title="Infrastructure Intelligence Platform",
@@ -19,69 +19,118 @@ st.set_page_config(
 )
 
 
-# ---------------- LOGIN ----------------
-def check_login():
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    if not st.session_state.authenticated:
-        st.title("Allen Hammett AI")
-        st.subheader("Private Infrastructure Intelligence Access")
-
-        password = st.text_input("Enter Access Code", type="password")
-
-        if password == "dewalt2026":
-            st.session_state.authenticated = True
-            st.rerun()
-        elif password:
-            st.error("Invalid access code")
-
-        st.stop()
+def run_query(sql: str, params=None) -> pd.DataFrame:
+    conn = psycopg.connect(DATABASE_URL)
+    try:
+        return pd.read_sql(sql, conn, params=params)
+    finally:
+        conn.close()
 
 
-check_login()
+def authenticate_user(email: str, password: str):
+    url = f"{SUPABASE_URL}/auth/v1/token?grant_type=password"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {"email": email, "password": password}
 
-st.title("Infrastructure Intelligence Platform")
-st.caption("Allen Hammett AI — Private Access Preview")
-st.success("🟢 Action-only mode: showing prioritized infrastructure targets with BD guidance.")
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+    except Exception:
+        return None
 
-if not DATABASE_URL:
-    st.error("DATABASE_URL not found")
+    if response.status_code != 200:
+        return None
+
+    return response.json()
+
+
+def get_user_profile(email: str):
+    df = run_query(
+        """
+        select email, full_name, company, role, access_status, access_expires_at
+        from user_profiles
+        where lower(email) = lower(%s)
+        limit 1
+        """,
+        (email,),
+    )
+
+    if df.empty:
+        return None
+
+    return df.iloc[0].to_dict()
+
+
+def login_screen():
+    if "user" not in st.session_state:
+        st.session_state.user = None
+
+    if st.session_state.user:
+        return st.session_state.user
+
+    st.title("Allen Hammett AI")
+    st.subheader("Private Infrastructure Intelligence Access")
+
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Sign In"):
+        if not email or not password:
+            st.error("Enter email and password.")
+            st.stop()
+
+        auth_result = authenticate_user(email.strip(), password)
+
+        if not auth_result:
+            st.error("Invalid login.")
+            st.stop()
+
+        profile = get_user_profile(email.strip().lower())
+
+        if not profile:
+            st.error("Your account exists, but access has not been approved.")
+            st.stop()
+
+        if profile["access_status"] != "active":
+            st.error("Your access is not active.")
+            st.stop()
+
+        expires_at = profile.get("access_expires_at")
+
+        if expires_at is not None:
+            expires_at = pd.to_datetime(expires_at, utc=True)
+            now_utc = pd.Timestamp.now(tz="UTC")
+
+            if expires_at < now_utc:
+                st.error("Your preview access has expired. Contact Allen Hammett Inc to continue access.")
+                st.stop()
+
+        st.session_state.user = profile
+        st.rerun()
+
     st.stop()
 
 
-# ---------------- DATA ACCESS ----------------
-def run_query(sql: str) -> pd.DataFrame:
-    conn = psycopg.connect(DATABASE_URL)
-    try:
-        df = pd.read_sql(sql, conn)
-    finally:
-        conn.close()
-    return df
+if not DATABASE_URL:
+    st.error("DATABASE_URL not found.")
+    st.stop()
+
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error("SUPABASE_URL or SUPABASE_ANON_KEY not found in Streamlit secrets.")
+    st.stop()
 
 
-# Pull a wider set, then filter/rank in Python
-df = run_query("""
-select
-    case_number,
-    project_name,
-    project_type,
-    project_stage,
-    created_at,
-    project_description
-from signals
-where (
-        created_at >= now() - interval '365 days'
-        or project_stage in ('Approved', 'In Review', 'Pending')
-      )
-order by created_at desc
-limit 1000
-""")
+user = login_screen()
+role = user["role"]
 
-df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+st.title("Infrastructure Intelligence Platform")
+st.caption(f"Allen Hammett AI — Private Access Preview | {user.get('company', '')}")
+st.success("🟢 Action-only mode: showing prioritized infrastructure targets with BD guidance.")
 
 
-# ---------------- HELPERS ----------------
 def clean_text(value) -> str:
     if value is None or pd.isnull(value):
         return ""
@@ -91,9 +140,7 @@ def clean_text(value) -> str:
 def extract_filing_year(case_number: str) -> str:
     text = clean_text(case_number)
     match = re.search(r"(20\d{2}|19\d{2})", text)
-    if match:
-        return match.group(1)
-    return "Unknown"
+    return match.group(1) if match else "Unknown"
 
 
 def extract_target_company(project_name: str, description: str) -> str:
@@ -120,6 +167,11 @@ def extract_target_company(project_name: str, description: str) -> str:
         "Meta",
         "Google",
         "Microsoft",
+        "Compass",
+        "EdgeCore",
+        "Equinix",
+        "Iron Mountain",
+        "Cologix",
     ]
 
     for company in known_companies:
@@ -138,18 +190,20 @@ def extract_target_company(project_name: str, description: str) -> str:
         if match:
             return match.group(1).strip()
 
-    if name:
+    low_value_names = {"", "none", "unknown", "gis update"}
+
+    if name and name.lower() not in low_value_names and len(name) >= 4:
         return name
 
     return "Unknown Target"
 
 
-def infer_target_role(project_type: str, project_stage: str, description: str, project_name: str) -> str:
+def infer_target_role(project_type, project_stage, description, project_name):
     ptype = clean_text(project_type).lower()
     stage = clean_text(project_stage).lower()
     desc = clean_text(description).lower()
     name = clean_text(project_name).lower()
-    combined = f"{ptype} {desc} {name}"
+    combined = f"{ptype} {stage} {desc} {name}"
 
     if "substation" in combined or "dominion" in combined or "novec" in combined:
         return "Utility / Power Infrastructure Lead"
@@ -157,8 +211,8 @@ def infer_target_role(project_type: str, project_stage: str, description: str, p
     if "performance bond" in combined:
         return "General Contractor / Construction Manager"
 
-    if stage in ["approved", "in review", "pending"]:
-        if "data center" in combined:
+    if stage in ["approved", "in review", "pending", "submitted", "submitted - online"]:
+        if "data center" in combined or "datacenter" in combined:
             return "Developer / Project Delivery Lead"
         if "warehouse" in combined or "industrial" in combined or "commercial" in combined:
             return "Developer / Construction Lead"
@@ -172,19 +226,19 @@ def infer_target_role(project_type: str, project_stage: str, description: str, p
     return "Developer / Owner Representative"
 
 
-def timing_bucket(date_value) -> str:
+def timing_bucket(date_value):
     if pd.isnull(date_value):
         return "Unknown"
 
     try:
         ts = pd.Timestamp(date_value)
+
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
         else:
             ts = ts.tz_convert("UTC")
 
-        now_utc = pd.Timestamp.now(tz="UTC")
-        days = (now_utc - ts).days
+        days = (pd.Timestamp.now(tz="UTC") - ts).days
 
         if days <= 90:
             return "🟢 Immediate"
@@ -201,26 +255,22 @@ def days_since(date_value):
 
     try:
         ts = pd.Timestamp(date_value)
+
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
         else:
             ts = ts.tz_convert("UTC")
 
-        now_utc = pd.Timestamp.now(tz="UTC")
-        return int((now_utc - ts).days)
+        return int((pd.Timestamp.now(tz="UTC") - ts).days)
     except Exception:
         return 9999
 
 
-def relevance_score(project_name: str, project_type: str, description: str) -> int:
-    name = clean_text(project_name).lower()
-    ptype = clean_text(project_type).lower()
-    desc = clean_text(description).lower()
-    combined = f"{name} {ptype} {desc}"
-
+def relevance_score(project_name, project_type, description):
+    combined = f"{clean_text(project_name)} {clean_text(project_type)} {clean_text(description)}".lower()
     score = 0
 
-    high_value_keywords = [
+    for kw in [
         "data center",
         "datacenter",
         "substation",
@@ -231,35 +281,35 @@ def relevance_score(project_name: str, project_type: str, description: str) -> i
         "server",
         "switchyard",
         "power",
-    ]
-
-    for kw in high_value_keywords:
+        "utility",
+    ]:
         if kw in combined:
             score += 20
 
-    if any(x in combined for x in ["cyrus", "vantage", "qts", "digital realty", "stack", "coresite", "aligned", "intergate", "novec", "dominion"]):
+    if any(x in combined for x in [
+        "cyrus", "vantage", "qts", "digital realty", "stack",
+        "coresite", "aligned", "intergate", "novec", "dominion",
+        "blackchamber", "cologix", "edgecore", "equinix"
+    ]):
         score += 25
 
-    if "agricultural" in combined or "forestal" in combined or "vineyard" in combined:
-        score -= 60
+    if any(x in combined for x in ["agricultural", "forestal", "vineyard", "gis update"]):
+        score -= 100
 
     return score
 
 
-def stage_score(project_stage: str, project_type: str, description: str) -> int:
+def stage_score(project_stage, project_type, description):
     stage = clean_text(project_stage).lower()
-    ptype = clean_text(project_type).lower()
-    desc = clean_text(description).lower()
-    combined = f"{stage} {ptype} {desc}"
-
+    combined = f"{stage} {clean_text(project_type)} {clean_text(description)}".lower()
     score = 0
 
     if stage == "approved":
         score += 40
     elif stage == "in review":
         score += 30
-    elif stage == "pending":
-        score += 20
+    elif stage in ["pending", "submitted", "submitted - online"]:
+        score += 15
 
     if "performance bond" in combined:
         score += 35
@@ -270,7 +320,7 @@ def stage_score(project_stage: str, project_type: str, description: str) -> int:
     return score
 
 
-def freshness_score(date_value) -> int:
+def freshness_score(date_value):
     d = days_since(date_value)
 
     if d <= 90:
@@ -282,79 +332,47 @@ def freshness_score(date_value) -> int:
     return 0
 
 
-def targetability_score(target_company: str, target_role: str, description: str) -> int:
-    company = clean_text(target_company).lower()
-    role = clean_text(target_role).lower()
-    desc = clean_text(description).lower()
-
+def targetability_score(target_company, target_role, description):
     score = 0
 
-    if company and company != "unknown target":
+    if clean_text(target_company).lower() != "unknown target":
         score += 20
 
-    if role and "unknown" not in role:
+    if clean_text(target_role):
         score += 20
 
-    if desc:
+    if clean_text(description):
         score += 10
 
     return score
 
 
-def actionability_score(row) -> int:
-    return (
-        relevance_score(row["project_name"], row["project_type"], row["project_description"])
-        + stage_score(row["project_stage"], row["project_type"], row["project_description"])
-        + freshness_score(row["created_at"])
-        + targetability_score(row["Target Company"], row["Target Role"], row["project_description"])
-    )
-
-
-def opportunity_stage_from_score(score: int) -> str:
-    if score >= 85:
-        return "🟢 Act Now"
-    if score >= 55:
-        return "🟡 Position Early"
-    return "🔵 Research Queue"
-
-
-def why_this_matters(row) -> str:
-    project_type = clean_text(row["project_type"]).lower()
-    project_stage = clean_text(row["project_stage"]).lower()
-    project_name = clean_text(row["project_name"]).lower()
-    desc = clean_text(row["project_description"]).lower()
-    combined = f"{project_type} {project_stage} {project_name} {desc}"
+def why_this_matters(row):
+    combined = f"{row['project_type']} {row['project_stage']} {row['project_name']} {row['project_description']}".lower()
 
     if "substation" in combined or "dominion" in combined or "novec" in combined:
         return "Power infrastructure movement often signals major site-readiness and downstream construction spend."
 
-    if "amendment" in combined and "data center" in combined:
+    if "amendment" in combined and ("data center" in combined or "datacenter" in combined):
         return "A data center amendment often indicates expansion activity and a new vendor influence window."
 
-    if "approved" in combined and "data center" in combined:
+    if "approved" in combined and ("data center" in combined or "datacenter" in combined):
         return "Approved data center work suggests the project is moving toward procurement and execution."
 
-    if "in review" in combined and "data center" in combined:
+    if "in review" in combined and ("data center" in combined or "datacenter" in combined):
         return "An in-review data center project creates a window to influence stakeholders before award paths harden."
 
     if "performance bond" in combined:
         return "Performance bond activity is a late pre-construction signal and often precedes field mobilization."
 
-    if "warehouse" in combined or "industrial" in combined or "commercial" in combined:
-        return "Industrial and commercial site movement often signals near-term contractor and equipment demand."
-
     return "This signal shows active infrastructure movement with potential downstream procurement value."
 
 
-def recommended_move(row) -> str:
+def recommended_move(row):
     role = clean_text(row["Target Role"]).lower()
-    stage = clean_text(row["project_stage"]).lower()
-    project_type = clean_text(row["project_type"]).lower()
-    desc = clean_text(row["project_description"]).lower()
-    combined = f"{role} {stage} {project_type} {desc}"
 
     if "utility" in role:
-        return "Approach power and site-infrastructure stakeholders now around site readiness, contractor activity, and field support needs."
+        return "Approach power and site-infrastructure stakeholders around site readiness, contractor activity, and field support needs."
 
     if "general contractor" in role or "construction manager" in role:
         return "Reach the GC / CM now to position DeWalt as the jobsite standard before mobilization accelerates."
@@ -371,134 +389,152 @@ def recommended_move(row) -> str:
     return "Use this signal to identify the delivery-side decision path before competitors establish the relationship."
 
 
-# ---------------- ENRICH ----------------
+df = run_query("""
+select
+    case_number,
+    project_name,
+    project_type,
+    project_stage,
+    created_at,
+    project_description
+from signals
+where (
+        created_at >= now() - interval '365 days'
+        or project_stage in ('Approved', 'In Review', 'Pending', 'Submitted', 'Submitted - Online')
+      )
+order by created_at desc
+limit 1500
+""")
+
+df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
 df["Filing Year"] = df["case_number"].apply(extract_filing_year)
-df["Target Company"] = df.apply(
-    lambda row: extract_target_company(row.get("project_name"), row.get("project_description")),
-    axis=1
-)
-df["Target Role"] = df.apply(
-    lambda row: infer_target_role(
-        row.get("project_type"),
-        row.get("project_stage"),
-        row.get("project_description"),
-        row.get("project_name")
+df["Target Company"] = df.apply(lambda row: extract_target_company(row["project_name"], row["project_description"]), axis=1)
+df["Target Role"] = df.apply(lambda row: infer_target_role(row["project_type"], row["project_stage"], row["project_description"], row["project_name"]), axis=1)
+df["Timing"] = df["created_at"].apply(timing_bucket)
+df["Days Since Signal"] = df["created_at"].apply(days_since)
+
+df["Actionability Score"] = df.apply(
+    lambda row: (
+        relevance_score(row["project_name"], row["project_type"], row["project_description"])
+        + stage_score(row["project_stage"], row["project_type"], row["project_description"])
+        + freshness_score(row["created_at"])
+        + targetability_score(row["Target Company"], row["Target Role"], row["project_description"])
     ),
     axis=1
 )
-df["Timing"] = df["created_at"].apply(timing_bucket)
-df["Days Since Signal"] = df["created_at"].apply(days_since)
-df["Actionability Score"] = df.apply(actionability_score, axis=1)
-df["Opportunity Stage"] = df["Actionability Score"].apply(opportunity_stage_from_score)
+
+df["Opportunity Stage"] = df["Actionability Score"].apply(
+    lambda score: "🟢 Act Now" if score >= 85 else "🟡 Position Early" if score >= 60 else "🔵 Research Queue"
+)
+
 df["Why This Matters"] = df.apply(why_this_matters, axis=1)
 df["Recommended Move"] = df.apply(recommended_move, axis=1)
 
-# Remove obvious junk from main flow
 junk_mask = (
-    df["project_name"].fillna("").str.lower().str.contains("agricultural|forestal|vineyard", regex=True)
-    | df["project_type"].fillna("").str.lower().str.contains("agricultural|forestal", regex=True)
-    | df["project_description"].fillna("").str.lower().str.contains("agricultural|forestal|vineyard", regex=True)
+    df["project_name"].fillna("").str.lower().str.contains("agricultural|forestal|vineyard|gis update", regex=True)
+    | df["project_type"].fillna("").str.lower().str.contains("agricultural|forestal|gis update", regex=True)
+    | df["project_description"].fillna("").str.lower().str.contains("agricultural|forestal|vineyard|gis update", regex=True)
+    | df["project_name"].isna()
 )
+
 df["Is Junk"] = junk_mask
 
-action_df = df[(df["Is Junk"] == False) & (df["Actionability Score"] >= 55)].copy()
-research_df = df[(df["Is Junk"] == False) & (df["Actionability Score"] < 55)].copy()
+action_df = df[
+    (df["Is Junk"] == False)
+    & (df["Actionability Score"] >= 60)
+    & (df["Target Company"] != "Unknown Target")
+].copy()
 
-action_df = action_df.sort_values(
-    by=["Actionability Score", "created_at"],
-    ascending=[False, False]
-)
-research_df = research_df.sort_values(
-    by=["Actionability Score", "created_at"],
-    ascending=[False, False]
-)
+research_df = df[
+    (df["Is Junk"] == False)
+    & (
+        (df["Actionability Score"] < 60)
+        | (df["Target Company"] == "Unknown Target")
+    )
+].copy()
+
+action_df = action_df.sort_values(by=["Actionability Score", "created_at"], ascending=[False, False])
+research_df = research_df.sort_values(by=["Actionability Score", "created_at"], ascending=[False, False])
 
 act_now_df = action_df[action_df["Opportunity Stage"] == "🟢 Act Now"].copy()
 position_df = action_df[action_df["Opportunity Stage"] == "🟡 Position Early"].copy()
 
+if role == "trial_viewer":
+    act_now_df = act_now_df.head(5)
+    position_df = position_df.head(5)
+    research_df = research_df.head(0)
 
-# ---------------- KPI BAR ----------------
+elif role == "bd_viewer":
+    act_now_df = act_now_df.head(25)
+    position_df = position_df.head(25)
+    research_df = research_df.head(0)
+
+elif role == "executive_full":
+    act_now_df = act_now_df.head(100)
+    position_df = position_df.head(100)
+
+elif role == "admin":
+    pass
+
 col1, col2, col3, col4 = st.columns(4)
+col1.metric("Act Now Targets", len(act_now_df))
+col2.metric("Position Early Targets", len(position_df))
+col3.metric("Research Queue", len(research_df))
+latest_ts = df["created_at"].max()
+col4.metric("Latest Signal Date", "Unknown" if pd.isnull(latest_ts) else str(latest_ts.date()))
 
-with col1:
-    st.metric("Act Now Targets", len(act_now_df))
-with col2:
-    st.metric("Position Early Targets", len(position_df))
-with col3:
-    st.metric("Research Queue", len(research_df))
-with col4:
-    latest_ts = df["created_at"].max()
-    latest_label = "Unknown" if pd.isnull(latest_ts) else str(latest_ts.date())
-    st.metric("Latest Signal Date", latest_label)
-
-
-# ---------------- TOP SIGNALS ----------------
 st.header("🟢 Immediate Opportunity Signals")
 
 if act_now_df.empty:
-    st.info("No immediate targets found in the current filtered set.")
+    st.info("No immediate targets found.")
 else:
     for _, row in act_now_df.head(8).iterrows():
         st.success(
             f"{row['Target Company']} — {row['project_name']} | {row['project_stage']} | Target: {row['Target Role']}"
         )
 
-
-# ---------------- ACT NOW ----------------
 st.header("🟢 Act Now")
 
-if act_now_df.empty:
-    st.info("No act-now targets currently pass the actionability threshold.")
-else:
-    st.dataframe(
-        act_now_df[
-            [
-                "case_number",
-                "Filing Year",
-                "Target Company",
-                "project_name",
-                "project_type",
-                "project_stage",
-                "Timing",
-                "Target Role",
-                "Actionability Score",
-                "Recommended Move",
-            ]
-        ],
-        use_container_width=True
-    )
+st.dataframe(
+    act_now_df[
+        [
+            "case_number",
+            "Filing Year",
+            "Target Company",
+            "project_name",
+            "project_type",
+            "project_stage",
+            "Timing",
+            "Target Role",
+            "Actionability Score",
+            "Recommended Move",
+        ]
+    ],
+    use_container_width=True,
+)
 
-
-# ---------------- POSITION EARLY ----------------
 st.header("🟡 Position Early")
 
-if position_df.empty:
-    st.info("No position-early targets currently pass the actionability threshold.")
-else:
-    st.dataframe(
-        position_df[
-            [
-                "case_number",
-                "Filing Year",
-                "Target Company",
-                "project_name",
-                "project_type",
-                "project_stage",
-                "Timing",
-                "Target Role",
-                "Actionability Score",
-                "Recommended Move",
-            ]
-        ],
-        use_container_width=True
-    )
+st.dataframe(
+    position_df[
+        [
+            "case_number",
+            "Filing Year",
+            "Target Company",
+            "project_name",
+            "project_type",
+            "project_stage",
+            "Timing",
+            "Target Role",
+            "Actionability Score",
+            "Recommended Move",
+        ]
+    ],
+    use_container_width=True,
+)
 
-
-# ---------------- RESEARCH QUEUE ----------------
-with st.expander("🔵 Research Queue (Lower Confidence / Watchlist)", expanded=False):
-    if research_df.empty:
-        st.info("No research items available.")
-    else:
+if role in ["admin", "executive_full"]:
+    with st.expander("🔵 Research Queue", expanded=False):
         st.dataframe(
             research_df[
                 [
@@ -513,27 +549,25 @@ with st.expander("🔵 Research Queue (Lower Confidence / Watchlist)", expanded=
                     "Actionability Score",
                 ]
             ].head(100),
-            use_container_width=True
+            use_container_width=True,
         )
 
-
-# ---------------- DETAIL VIEW ----------------
 st.header("Project Detail")
 
-detail_source = action_df if not action_df.empty else df
-project_options = (
-    detail_source["project_name"]
-    .dropna()
-    .astype(str)
-    .unique()
-    .tolist()
+detail_df = action_df.copy()
+detail_df["Detail Key"] = detail_df.apply(
+    lambda row: f"{clean_text(row['case_number'])} | {clean_text(row['project_name'])}",
+    axis=1,
 )
 
-if not project_options:
+if role == "trial_viewer":
+    detail_df = detail_df.head(5)
+
+if detail_df.empty:
     st.info("No projects available for detail view.")
 else:
-    selected = st.selectbox("Select a project", project_options)
-    detail = detail_source[detail_source["project_name"] == selected].iloc[0]
+    selected_key = st.selectbox("Select a project", detail_df["Detail Key"].tolist())
+    detail = detail_df[detail_df["Detail Key"] == selected_key].iloc[0]
 
     st.subheader(str(detail.get("project_name", "Unknown Project")))
 
@@ -562,5 +596,17 @@ else:
     st.markdown("### Description")
     st.write(detail.get("project_description", ""))
 
+if role == "admin":
+    with st.expander("Admin: User Access Overview", expanded=False):
+        users_df = run_query("""
+        select email, full_name, company, role, access_status, access_expires_at, created_at
+        from user_profiles
+        order by created_at desc
+        """)
+        st.dataframe(users_df, use_container_width=True)
+
+if st.button("Sign Out"):
+    st.session_state.user = None
+    st.rerun()
 
 st.info("Allen Hammett AI — Infrastructure Intelligence | Confidential Preview")
