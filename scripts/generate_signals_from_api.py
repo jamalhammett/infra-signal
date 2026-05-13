@@ -1,7 +1,7 @@
 import os
 from decimal import Decimal, InvalidOperation
 
-import psycopg
+import psycopg2 as psycopg
 import requests
 from dotenv import load_dotenv
 
