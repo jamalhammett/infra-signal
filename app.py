@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import subprocess
 
 import pandas as pd
@@ -20,9 +21,6 @@ st.set_page_config(
 )
 
 
-# =========================
-# DATABASE
-# =========================
 def run_query(sql: str, params=None) -> pd.DataFrame:
     conn = psycopg.connect(DATABASE_URL)
     try:
@@ -31,9 +29,6 @@ def run_query(sql: str, params=None) -> pd.DataFrame:
         conn.close()
 
 
-# =========================
-# SUPABASE AUTH
-# =========================
 def authenticate_user(email: str, password: str):
     url = f"{SUPABASE_URL}/auth/v1/token?grant_type=password"
     headers = {
@@ -221,9 +216,6 @@ def login_screen():
     st.stop()
 
 
-# =========================
-# ADMIN REFRESH CONTROLS
-# =========================
 def admin_refresh_controls(role):
     if role != "admin":
         return
@@ -247,7 +239,7 @@ def admin_refresh_controls(role):
             )
 
             result2 = subprocess.run(
-                ["python", "scripts/promote_signals_to_projects.py"],
+                [sys.executable, "scripts/promote_signals_to_projects.py"],
                 check=True,
                 timeout=180,
                 capture_output=True,
@@ -267,9 +259,6 @@ def admin_refresh_controls(role):
             st.sidebar.code(str(e))
 
 
-# =========================
-# SAFETY CHECKS
-# =========================
 if not DATABASE_URL:
     st.error("DATABASE_URL not found.")
     st.stop()
@@ -291,9 +280,6 @@ st.caption(f"Allen Hammett AI — Private Access Preview | {user.get('company', 
 st.success("🟢 Action-only mode: showing prioritized infrastructure targets with BD guidance.")
 
 
-# =========================
-# HELPERS
-# =========================
 def clean_text(value) -> str:
     if value is None or pd.isnull(value):
         return ""
@@ -552,9 +538,6 @@ def recommended_move(row):
     return "Use this signal to identify the delivery-side decision path before competitors establish the relationship."
 
 
-# =========================
-# DATA LOAD
-# =========================
 df = run_query("""
 select
     case_number,
@@ -643,9 +626,6 @@ elif role == "admin":
     pass
 
 
-# =========================
-# DASHBOARD
-# =========================
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Act Now Targets", len(act_now_df))
 col2.metric("Position Early Targets", len(position_df))
