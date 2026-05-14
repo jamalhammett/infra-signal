@@ -1,6 +1,6 @@
 import os
 
-import psycopg
+import psycopg2 as psycopg
 from dotenv import load_dotenv
 
 load_dotenv()
