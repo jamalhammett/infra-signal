@@ -5,7 +5,6 @@ import os
 import re
 import subprocess
 import sys
-
 import pandas as pd
 import psycopg2 as psycopg
 import requests
@@ -15,30 +14,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
-SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY", os.getenv("SUPABASE_ANON_KEY"))
 
 st.set_page_config(page_title="Infrastructure Intelligence Platform", layout="wide")
+
 
 # =========================
 # DATABASE
 # =========================
-def run_query(sql: str, params=None) -> pd.DataFrame:
+def run_query(sql: str):
     conn = psycopg.connect(DATABASE_URL)
     try:
-        return pd.read_sql(sql, conn, params=params)
+        return pd.read_sql(sql, conn)
     finally:
         conn.close()
+
 
 # =========================
 # ADMIN REFRESH
 # =========================
-def admin_refresh_controls(role):
-    if role != "admin":
-        return
-
-    st.sidebar.header("Admin Controls")
-
+def admin_refresh_controls():
     if st.sidebar.button("Refresh Infrastructure Signals"):
         st.sidebar.info("Refresh started...")
 
@@ -46,75 +40,71 @@ def admin_refresh_controls(role):
         env["DATABASE_URL"] = DATABASE_URL
 
         try:
-            result1 = subprocess.run(
+            subprocess.run(
                 [sys.executable, "scripts/generate_signals_from_api.py"],
                 check=True,
                 timeout=180,
-                capture_output=True,
-                text=True,
                 env=env
             )
 
-            result2 = subprocess.run(
+            subprocess.run(
                 [sys.executable, "scripts/promote_signals_to_projects.py"],
                 check=True,
                 timeout=180,
-                capture_output=True,
-                text=True,
                 env=env
             )
 
-            st.sidebar.success("Signals refreshed.")
-            st.sidebar.code(result1.stdout + "\n" + result2.stdout)
+            st.sidebar.success("Signals refreshed successfully.")
 
-        except subprocess.CalledProcessError as e:
-            st.sidebar.error("Refresh failed.")
-            st.sidebar.code((e.stdout or "") + "\n" + (e.stderr or ""))
+        except Exception as e:
+            st.sidebar.error(f"Refresh failed: {e}")
+
 
 # =========================
-# DATA LOAD (UPDATED 🔥)
+# DATA LOAD ✅ FIXED
 # =========================
 df = run_query("""
-select
+SELECT
     case_number,
     project_name,
     project_type,
     project_stage,
     created_at,
     project_description
-from signals
-where (
-    created_at >= now() - interval '90 days'
+FROM signals
+WHERE (
+    created_at >= NOW() - INTERVAL '90 days'
 )
-and (
-    lower(project_name) like '%data center%'
-    or lower(project_description) like '%data center%'
-    or lower(project_type) like '%data center%'
+AND (
+    LOWER(project_name) LIKE '%data center%'
+    OR LOWER(project_description) LIKE '%data center%'
+    OR LOWER(project_type) LIKE '%data center%'
 
-    or lower(project_description) like '%substation%'
-    or lower(project_description) like '%switchyard%'
-    or lower(project_description) like '%server%'
-    or lower(project_description) like '%cloud%'
-    or lower(project_description) like '%transmission%'
+    OR LOWER(project_description) LIKE '%substation%'
+    OR LOWER(project_description) LIKE '%switchyard%'
+    OR LOWER(project_description) LIKE '%server%'
+    OR LOWER(project_description) LIKE '%cloud%'
+    OR LOWER(project_description) LIKE '%transmission%'
 )
-and (
-    lower(project_description) like '%loudoun%'
-    or lower(project_description) like '%prince william%'
-    or lower(project_description) like '%fairfax%'
-    or lower(project_description) like '%stafford%'
-    or lower(project_description) like '%fauquier%'
-    or lower(project_description) like '%henrico%'
+AND (
+    LOWER(project_description) LIKE '%loudoun%'
+    OR LOWER(project_description) LIKE '%prince william%'
+    OR LOWER(project_description) LIKE '%fairfax%'
+    OR LOWER(project_description) LIKE '%stafford%'
+    OR LOWER(project_description) LIKE '%fauquier%'
+    OR LOWER(project_description) LIKE '%henrico%'
 )
-order by created_at desc
-limit 1500
+ORDER BY created_at DESC
+LIMIT 1500
 """)
 
 # =========================
 # HELPERS
 # =========================
-def extract_filing_year(case_number: str):
+def extract_filing_year(case_number):
     match = re.search(r"(20\d{2}|19\d{2})", str(case_number))
     return match.group(1) if match else "Unknown"
+
 
 # =========================
 # PROCESSING
@@ -122,17 +112,15 @@ def extract_filing_year(case_number: str):
 df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
 df["Filing Year"] = df["case_number"].apply(extract_filing_year)
 
-# Basic placeholders (your existing logic can stay if you want)
 df["Target Company"] = df["project_name"]
 df["Target Role"] = "Developer"
 
 # =========================
-# SCORING (KEEP SIMPLE + POWERFUL)
+# SCORING ✅ SAFE VERSION
 # =========================
 def score(row):
-    score = 0
-
     text = f"{row['project_name']} {row['project_description']}".lower()
+    score = 0
 
     if "data center" in text:
         score += 50
@@ -140,17 +128,19 @@ def score(row):
     if "substation" in text or "transmission" in text:
         score += 30
 
-    if row["created_at"]:
+    if pd.notnull(row["created_at"]):
         days = (pd.Timestamp.now(tz="UTC") - row["created_at"]).days
-        if days < 90:
+        if days <= 90:
             score += 20
 
     return score
 
+
 df["Actionability Score"] = df.apply(score, axis=1)
 
-# ✅ CRITICAL FILTER
+# ✅ FILTER HIGH VALUE ONLY
 df = df[df["Actionability Score"] >= 60]
+
 
 # =========================
 # BD OUTPUT
@@ -164,32 +154,36 @@ df["Outreach Hook"] = df.apply(
     axis=1
 )
 
+
 # =========================
 # UI
 # =========================
 st.title("Infrastructure Intelligence Platform")
 
-# ✅ LAST REFRESH
-st.sidebar.success(f"Last Auto Refresh: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}")
+admin_refresh_controls()
+
+st.sidebar.success(
+    f"Last Auto Refresh: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}"
+)
 
 st.subheader("Top Infrastructure Opportunities")
 
-st.dataframe(df[[
-    "case_number",
-    "Filing Year",
-    "project_name",
-    "project_stage",
-    "Target Company",
-    "Target Role",
-    "Actionability Score",
-    "Outreach Hook"
-]])
+st.dataframe(df[
+    [
+        "case_number",
+        "Filing Year",
+        "project_name",
+        "project_stage",
+        "Target Company",
+        "Target Role",
+        "Actionability Score",
+        "Outreach Hook"
+    ]
+])
 
-# ✅ EXPORT
 st.download_button(
     "Download BD Target List",
     data=df.to_csv(index=False),
     file_name="bd_targets.csv",
     mime="text/csv"
 )
-``
