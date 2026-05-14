@@ -237,7 +237,7 @@ def admin_refresh_controls(role):
         env["DATABASE_URL"] = DATABASE_URL
 
         try:
-            result1 = subprocess.run(S
+            result1 = subprocess.run(
                 [sys.executable, "scripts/generate_signals_from_api.py"],
                 check=True,
                 timeout=180,
