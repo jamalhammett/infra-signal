@@ -10,21 +10,47 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL is not set")
 
 
-BAD_VALUES = {
-    "",
-    "none",
-    "unknown",
-    "unknown target",
-    "unknown company",
-    "n/a",
-    "na",
-    "null",
-}
+TARGET_KEYWORDS = [
+    "data center",
+    "substation",
+    "switchyard",
+    "transmission",
+    "utility",
+    "industrial",
+    "warehouse",
+    "hyperscale",
+    "campus",
+    "fiber",
+    "telecom",
+    "power",
+    "energy",
+    "server",
+    "cloud",
+]
+
+
+EXCLUDED_KEYWORDS = [
+    "sidewalk",
+    "residential",
+    "townhome",
+    "single family",
+    "duplex",
+    "school",
+    "park",
+    "church",
+    "road widening",
+    "landscape",
+    "forest",
+    "playground",
+    "trail",
+    "side path",
+    "driveway",
+    "garage",
+]
 
 
 KNOWN_COMPANIES = [
     "CyrusOne",
-    "Vantage Data Centers",
     "Vantage",
     "QTS",
     "Digital Realty",
@@ -32,11 +58,6 @@ KNOWN_COMPANIES = [
     "Switch",
     "CoreSite",
     "Aligned",
-    "NOVEC",
-    "Dominion Energy",
-    "BlackChamber Group",
-    "Intergate",
-    "LC3",
     "Amazon",
     "Meta",
     "Google",
@@ -46,8 +67,9 @@ KNOWN_COMPANIES = [
     "Equinix",
     "Iron Mountain",
     "Cologix",
-    "Loudoun Business Park",
-    "Greenlin Park",
+    "NOVEC",
+    "Dominion",
+    "Sabey",
 ]
 
 
@@ -57,7 +79,7 @@ def clean_text(value):
 
     text = str(value).strip()
 
-    if text.lower() in BAD_VALUES:
+    if text == "":
         return None
 
     return text
@@ -73,27 +95,89 @@ def get_columns(cur, table_name):
         """,
         (table_name,),
     )
+
     return {row[0] for row in cur.fetchall()}
 
 
-def pick_project_name(row):
-    for key in [
-        "target_company",
-        "canonical_project_name",
-        "project_name",
-        "name",
-        "title",
-    ]:
-        value = clean_text(row.get(key))
-        if value:
-            return value
+def get_projects(cur):
+    project_columns = get_columns(cur, "projects")
 
-    return None
+    usable_cols = [
+        col for col in [
+            "id",
+            "case_number",
+            "project_name",
+            "canonical_project_name",
+            "target_company",
+            "project_stage",
+            "created_at",
+        ]
+        if col in project_columns
+    ]
+
+    select_cols = ", ".join(usable_cols)
+
+    where_clauses = []
+
+    if "created_at" in project_columns:
+        where_clauses.append(
+            "created_at >= now() - interval '90 days'"
+        )
+
+    if "project_stage" in project_columns:
+        where_clauses.append(
+            """
+            lower(project_stage) in (
+                'approved',
+                'in review',
+                'submitted',
+                'pending'
+            )
+            """
+        )
+
+    where_sql = ""
+
+    if where_clauses:
+        where_sql = "where " + " and ".join(where_clauses)
+
+    query = f"""
+        select {select_cols}
+        from projects
+        {where_sql}
+        order by created_at desc
+        limit 500
+    """
+
+    cur.execute(query)
+
+    rows = cur.fetchall()
+
+    projects = []
+
+    for row in rows:
+        item = dict(zip(usable_cols, row))
+        projects.append(item)
+
+    return projects
+
+
+def is_target_project(project_name):
+    if not project_name:
+        return False
+
+    lowered = project_name.lower()
+
+    if any(keyword in lowered for keyword in EXCLUDED_KEYWORDS):
+        return False
+
+    if any(keyword in lowered for keyword in TARGET_KEYWORDS):
+        return True
+
+    return False
 
 
 def extract_company(project_name):
-    project_name = clean_text(project_name)
-
     if not project_name:
         return None
 
@@ -103,104 +187,61 @@ def extract_company(project_name):
         if company.lower() in lowered:
             return company
 
-    junk_terms = [
-        "gis update",
-        "agricultural",
-        "forestal",
-        "vineyard",
-        "unknown",
-        "none",
-    ]
-
-    if any(term in lowered for term in junk_terms):
-        return None
-
-    if len(project_name) < 4:
-        return None
-
-    return project_name
+    return None
 
 
-def get_projects(cur):
-    project_columns = get_columns(cur, "projects")
-
-    if "id" not in project_columns:
-        raise ValueError("projects table must have an id column")
-
-    usable_cols = [
-        col for col in [
-            "id",
-            "case_number",
-            "target_company",
-            "canonical_project_name",
-            "project_name",
-            "name",
-            "title",
-            "created_at",
-        ]
-        if col in project_columns
-    ]
-
-    select_cols = ", ".join(usable_cols)
-    order_clause = "order by created_at desc" if "created_at" in project_columns else ""
-
-    cur.execute(
-        f"""
-        select {select_cols}
-        from projects
-        {order_clause}
-        limit 500
-        """
+def build_lead(project):
+    project_name = (
+        clean_text(project.get("canonical_project_name"))
+        or clean_text(project.get("project_name"))
+        or clean_text(project.get("target_company"))
     )
 
-    rows = cur.fetchall()
-    projects = []
+    if not project_name:
+        return None
 
-    for row in rows:
-        item = dict(zip(usable_cols, row))
+    if not is_target_project(project_name):
+        return None
 
-        project_name = pick_project_name(item)
-        company = extract_company(project_name)
+    company = extract_company(project_name)
 
-        if not company:
-            continue
+    if not company:
+        return None
 
-        projects.append(
-            {
-                "project_id": item.get("id"),
-                "case_number": item.get("case_number"),
-                "company": company,
-            }
-        )
+    return {
+        "project_id": project.get("id"),
+        "case_number": project.get("case_number"),
+        "company": company,
+        "contact_name": "BD Contact Needed",
+        "title": "Infrastructure Opportunity Lead",
+        "phone": None,
+        "email": None,
+    }
 
-    return projects
 
+def lead_exists(cur, leads_columns, lead):
+    company = lead["company"]
 
-def lead_exists(cur, leads_columns, project):
-    company = project["company"]
-
-    if "project_id" in leads_columns:
+    if "project_id" in leads_columns and lead.get("project_id"):
         cur.execute(
             """
             select 1
             from leads
             where project_id = %s
-              and lower(trim(company)) = lower(trim(%s))
             limit 1
             """,
-            (project["project_id"], company),
+            (lead["project_id"],),
         )
 
-    elif "case_number" in leads_columns and project.get("case_number"):
+    elif "case_number" in leads_columns and lead.get("case_number"):
         cur.execute(
             """
             select 1
             from leads
             where case_number = %s
-              and lower(trim(company)) = lower(trim(%s))
             limit 1
             """,
-            (project["case_number"], company),
+            (lead["case_number"],),
         )
 
     else:
@@ -208,30 +249,13 @@ def lead_exists(cur, leads_columns, project):
             """
             select 1
             from leads
-            where lower(trim(company)) = lower(trim(%s))
+            where lower(company) = lower(%s)
             limit 1
             """,
             (company,),
         )
 
     return cur.fetchone() is not None
-
-
-def build_lead(project):
-    company = clean_text(project.get("company"))
-
-    if not company:
-        return None
-
-    return {
-        "project_id": project.get("project_id"),
-        "case_number": project.get("case_number"),
-        "company": company,
-        "contact_name": "BD Contact Needed",
-        "title": "Project / Business Development Lead",
-        "phone": None,
-        "email": None,
-    }
 
 
 def insert_lead(cur, leads_columns, lead):
@@ -249,9 +273,6 @@ def insert_lead(cur, leads_columns, lead):
         field for field in allowed_fields
         if field in leads_columns
     ]
-
-    if "company" not in insert_fields:
-        raise ValueError("leads table must have a company column")
 
     values = [lead.get(field) for field in insert_fields]
 
@@ -277,9 +298,6 @@ def main():
 
     leads_columns = get_columns(cur, "leads")
 
-    if "company" not in leads_columns:
-        raise ValueError("leads table must have a company column")
-
     projects = get_projects(cur)
 
     inserted = 0
@@ -292,14 +310,16 @@ def main():
             skipped += 1
             continue
 
-        if lead_exists(cur, leads_columns, project):
+        if lead_exists(cur, leads_columns, lead):
             skipped += 1
             continue
 
         insert_lead(cur, leads_columns, lead)
+
         inserted += 1
 
     conn.commit()
+
     cur.close()
     conn.close()
 
