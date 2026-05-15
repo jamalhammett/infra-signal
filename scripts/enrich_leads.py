@@ -1,4 +1,5 @@
 import os
+import re
 import psycopg2 as psycopg
 from dotenv import load_dotenv
 
@@ -12,77 +13,83 @@ if not DATABASE_URL:
 
 TARGET_KEYWORDS = [
     "data center",
+    "datacenter",
     "substation",
     "switchyard",
     "transmission",
     "utility",
-    "industrial",
-    "warehouse",
-    "hyperscale",
-    "campus",
-    "fiber",
-    "telecom",
     "power",
     "energy",
-    "server",
+    "fiber",
+    "telecom",
+    "hyperscale",
     "cloud",
+    "server",
 ]
-
 
 EXCLUDED_KEYWORDS = [
     "sidewalk",
-    "residential",
+    "trail",
+    "path",
+    "driveway",
+    "subdivision",
     "townhome",
+    "townhomes",
     "single family",
-    "duplex",
+    "residential",
+    "lot ",
+    "lots",
+    "farm",
+    "conservancy",
     "school",
-    "park",
     "church",
-    "road widening",
+    "playground",
+    "park",
     "landscape",
     "forest",
-    "playground",
-    "trail",
-    "side path",
-    "driveway",
-    "garage",
+    "stormwater",
+    "relocation drive",
 ]
 
-
 KNOWN_COMPANIES = [
+    "STACK",
+    "QTS",
     "CyrusOne",
     "Vantage",
-    "QTS",
     "Digital Realty",
-    "STACK",
-    "Switch",
     "CoreSite",
     "Aligned",
-    "Amazon",
-    "Meta",
-    "Google",
-    "Microsoft",
-    "Compass",
-    "EdgeCore",
     "Equinix",
     "Iron Mountain",
     "Cologix",
+    "EdgeCore",
+    "Compass",
+    "Amazon",
+    "AWS",
+    "Meta",
+    "Google",
+    "Microsoft",
     "NOVEC",
     "Dominion",
-    "Sabey",
+    "Dominion Energy",
 ]
 
 
 def clean_text(value):
     if value is None:
         return None
-
     text = str(value).strip()
-
-    if text == "":
+    if not text:
         return None
-
+    if text.lower() in {"none", "unknown", "unknown target", "n/a", "na", "null"}:
+        return None
     return text
+
+
+def looks_like_case_number(value):
+    if not value:
+        return False
+    return bool(re.match(r"^[A-Z]{2,10}-\d{4}-\d+", value.strip(), re.I))
 
 
 def get_columns(cur, table_name):
@@ -95,7 +102,6 @@ def get_columns(cur, table_name):
         """,
         (table_name,),
     )
-
     return {row[0] for row in cur.fetchall()}
 
 
@@ -109,101 +115,111 @@ def get_projects(cur):
             "project_name",
             "canonical_project_name",
             "target_company",
+            "project_description",
+            "description",
+            "project_type",
             "project_stage",
+            "county",
+            "state",
             "created_at",
         ]
         if col in project_columns
     ]
 
+    if "id" not in usable_cols:
+        raise ValueError("projects table must have an id column")
+
     select_cols = ", ".join(usable_cols)
 
-    where_clauses = []
+    where_parts = []
 
     if "created_at" in project_columns:
-        where_clauses.append(
-            "created_at >= now() - interval '90 days'"
-        )
+        where_parts.append("created_at >= now() - interval '90 days'")
 
     if "project_stage" in project_columns:
-        where_clauses.append(
+        where_parts.append(
             """
             lower(project_stage) in (
                 'approved',
                 'in review',
                 'submitted',
+                'submitted - online',
                 'pending'
             )
             """
         )
 
-    where_sql = ""
+    where_sql = "where " + " and ".join(where_parts) if where_parts else ""
 
-    if where_clauses:
-        where_sql = "where " + " and ".join(where_clauses)
-
-    query = f"""
+    cur.execute(
+        f"""
         select {select_cols}
         from projects
         {where_sql}
         order by created_at desc
-        limit 500
-    """
+        limit 1000
+        """
+    )
 
-    cur.execute(query)
-
-    rows = cur.fetchall()
-
-    projects = []
-
-    for row in rows:
-        item = dict(zip(usable_cols, row))
-        projects.append(item)
-
-    return projects
+    return [dict(zip(usable_cols, row)) for row in cur.fetchall()]
 
 
-def is_target_project(project_name):
-    if not project_name:
+def combined_project_text(project):
+    parts = [
+        project.get("target_company"),
+        project.get("canonical_project_name"),
+        project.get("project_name"),
+        project.get("project_description"),
+        project.get("description"),
+        project.get("project_type"),
+        project.get("project_stage"),
+    ]
+    return " ".join([clean_text(p) or "" for p in parts]).strip()
+
+
+def is_high_value_target(project):
+    text = combined_project_text(project)
+    lowered = text.lower()
+
+    if not text:
         return False
 
-    lowered = project_name.lower()
-
-    if any(keyword in lowered for keyword in EXCLUDED_KEYWORDS):
+    if any(bad in lowered for bad in EXCLUDED_KEYWORDS):
         return False
 
-    if any(keyword in lowered for keyword in TARGET_KEYWORDS):
-        return True
+    if not any(good in lowered for good in TARGET_KEYWORDS):
+        return False
 
-    return False
+    return True
 
 
-def extract_company(project_name):
-    if not project_name:
-        return None
-
-    lowered = project_name.lower()
+def extract_company(project):
+    text = combined_project_text(project)
+    lowered = text.lower()
 
     for company in KNOWN_COMPANIES:
         if company.lower() in lowered:
             return company
 
+    raw_target = clean_text(project.get("target_company"))
+
+    if raw_target and not looks_like_case_number(raw_target):
+        raw_lower = raw_target.lower()
+
+        if any(bad in raw_lower for bad in EXCLUDED_KEYWORDS):
+            return None
+
+        if any(good in lowered for good in TARGET_KEYWORDS):
+            return raw_target
+
     return None
 
 
 def build_lead(project):
-    project_name = (
-        clean_text(project.get("canonical_project_name"))
-        or clean_text(project.get("project_name"))
-        or clean_text(project.get("target_company"))
-    )
-
-    if not project_name:
+    if not is_high_value_target(project):
         return None
 
-    if not is_target_project(project_name):
-        return None
-
-    company = extract_company(project_name)
+    company = extract_company(project)
 
     if not company:
         return None
@@ -213,15 +229,13 @@ def build_lead(project):
         "case_number": project.get("case_number"),
         "company": company,
         "contact_name": "BD Contact Needed",
-        "title": "Infrastructure Opportunity Lead",
+        "title": "Infrastructure / Data Center Opportunity Lead",
         "phone": None,
         "email": None,
     }
 
 
 def lead_exists(cur, leads_columns, lead):
-    company = lead["company"]
-
     if "project_id" in leads_columns and lead.get("project_id"):
         cur.execute(
             """
@@ -232,7 +246,6 @@ def lead_exists(cur, leads_columns, lead):
             """,
             (lead["project_id"],),
         )
-
     elif "case_number" in leads_columns and lead.get("case_number"):
         cur.execute(
             """
@@ -243,16 +256,15 @@ def lead_exists(cur, leads_columns, lead):
             """,
             (lead["case_number"],),
         )
-
     else:
         cur.execute(
             """
             select 1
             from leads
-            where lower(company) = lower(%s)
+            where lower(trim(company)) = lower(trim(%s))
             limit 1
             """,
-            (company,),
+            (lead["company"],),
         )
 
     return cur.fetchone() is not None
@@ -269,10 +281,10 @@ def insert_lead(cur, leads_columns, lead):
         "email",
     ]
 
-    insert_fields = [
-        field for field in allowed_fields
-        if field in leads_columns
-    ]
+    insert_fields = [field for field in allowed_fields if field in leads_columns]
+
+    if "company" not in insert_fields:
+        raise ValueError("leads table must have a company column")
 
     values = [lead.get(field) for field in insert_fields]
 
@@ -297,7 +309,6 @@ def main():
     cur = conn.cursor()
 
     leads_columns = get_columns(cur, "leads")
-
     projects = get_projects(cur)
 
     inserted = 0
@@ -315,11 +326,9 @@ def main():
             continue
 
         insert_lead(cur, leads_columns, lead)
-
         inserted += 1
 
     conn.commit()
-
     cur.close()
     conn.close()
 
