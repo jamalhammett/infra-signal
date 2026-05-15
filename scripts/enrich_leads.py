@@ -1,5 +1,4 @@
 import os
-import re
 import psycopg2 as psycopg
 from dotenv import load_dotenv
 
@@ -47,6 +46,8 @@ KNOWN_COMPANIES = [
     "Equinix",
     "Iron Mountain",
     "Cologix",
+    "Loudoun Business Park",
+    "Greenlin Park",
 ]
 
 
@@ -62,7 +63,7 @@ def clean_text(value):
     return text
 
 
-def get_table_columns(cur, table_name):
+def get_columns(cur, table_name):
     cur.execute(
         """
         select column_name
@@ -75,20 +76,19 @@ def get_table_columns(cur, table_name):
     return {row[0] for row in cur.fetchall()}
 
 
-def pick_project_name_column(project_columns):
-    for col in [
+def pick_project_name(row):
+    for key in [
         "target_company",
         "canonical_project_name",
         "project_name",
         "name",
         "title",
     ]:
-        if col in project_columns:
-            return col
+        value = clean_text(row.get(key))
+        if value:
+            return value
 
-    raise ValueError(
-        "No usable project name/company column found in projects table."
-    )
+    return None
 
 
 def extract_company(project_name):
@@ -103,14 +103,13 @@ def extract_company(project_name):
         if company.lower() in lowered:
             return company
 
-    # Use project name as company only if it is meaningful
     junk_terms = [
         "gis update",
-        "unknown",
-        "none",
         "agricultural",
         "forestal",
         "vineyard",
+        "unknown",
+        "none",
     ]
 
     if any(term in lowered for term in junk_terms):
@@ -122,33 +121,27 @@ def extract_company(project_name):
     return project_name
 
 
-def make_placeholder_lead(company):
-    company = clean_text(company)
-
-    if not company:
-        return None
-
-    return {
-        "company": company,
-        "contact_name": "BD Contact Needed",
-        "title": "Project / Business Development Lead",
-        "phone": None,
-        "email": None,
-    }
-
-
 def get_projects(cur):
-    project_columns = get_table_columns(cur, "projects")
-    company_source_col = pick_project_name_column(project_columns)
+    project_columns = get_columns(cur, "projects")
 
-    optional_cols = []
+    if "id" not in project_columns:
+        raise ValueError("projects table must have an id column")
 
-    for col in ["id", "case_number", company_source_col, "created_at"]:
-        if col in project_columns and col not in optional_cols:
-            optional_cols.append(col)
+    usable_cols = [
+        col for col in [
+            "id",
+            "case_number",
+            "target_company",
+            "canonical_project_name",
+            "project_name",
+            "name",
+            "title",
+            "created_at",
+        ]
+        if col in project_columns
+    ]
 
-    select_cols = ", ".join(optional_cols)
-
+    select_cols = ", ".join(usable_cols)
     order_clause = "order by created_at desc" if "created_at" in project_columns else ""
 
     cur.execute(
@@ -161,14 +154,12 @@ def get_projects(cur):
     )
 
     rows = cur.fetchall()
-    col_index = {col: idx for idx, col in enumerate(optional_cols)}
-
     projects = []
 
     for row in rows:
-        project_id = row[col_index["id"]]
-        project_name = row[col_index[company_source_col]]
+        item = dict(zip(usable_cols, row))
 
+        project_name = pick_project_name(item)
         company = extract_company(project_name)
 
         if not company:
@@ -176,7 +167,8 @@ def get_projects(cur):
 
         projects.append(
             {
-                "project_id": project_id,
+                "project_id": item.get("id"),
+                "case_number": item.get("case_number"),
                 "company": company,
             }
         )
@@ -184,43 +176,98 @@ def get_projects(cur):
     return projects
 
 
-def lead_exists(cur, project_id, company):
-    cur.execute(
-        """
-        select id
-        from leads
-        where project_id = %s
-          and lower(trim(company)) = lower(trim(%s))
-        limit 1
-        """,
-        (project_id, company),
-    )
+def lead_exists(cur, leads_columns, project):
+    company = project["company"]
+
+    if "project_id" in leads_columns:
+        cur.execute(
+            """
+            select 1
+            from leads
+            where project_id = %s
+              and lower(trim(company)) = lower(trim(%s))
+            limit 1
+            """,
+            (project["project_id"], company),
+        )
+
+    elif "case_number" in leads_columns and project.get("case_number"):
+        cur.execute(
+            """
+            select 1
+            from leads
+            where case_number = %s
+              and lower(trim(company)) = lower(trim(%s))
+            limit 1
+            """,
+            (project["case_number"], company),
+        )
+
+    else:
+        cur.execute(
+            """
+            select 1
+            from leads
+            where lower(trim(company)) = lower(trim(%s))
+            limit 1
+            """,
+            (company,),
+        )
 
     return cur.fetchone() is not None
 
 
-def insert_lead(cur, project_id, lead):
+def build_lead(project):
+    company = clean_text(project.get("company"))
+
+    if not company:
+        return None
+
+    return {
+        "project_id": project.get("project_id"),
+        "case_number": project.get("case_number"),
+        "company": company,
+        "contact_name": "BD Contact Needed",
+        "title": "Project / Business Development Lead",
+        "phone": None,
+        "email": None,
+    }
+
+
+def insert_lead(cur, leads_columns, lead):
+    allowed_fields = [
+        "project_id",
+        "case_number",
+        "company",
+        "contact_name",
+        "title",
+        "phone",
+        "email",
+    ]
+
+    insert_fields = [
+        field for field in allowed_fields
+        if field in leads_columns
+    ]
+
+    if "company" not in insert_fields:
+        raise ValueError("leads table must have a company column")
+
+    values = [lead.get(field) for field in insert_fields]
+
+    columns_sql = ", ".join(insert_fields)
+    placeholders = ", ".join(["%s"] * len(insert_fields))
+
+    if "created_at" in leads_columns:
+        columns_sql += ", created_at"
+        placeholders += ", now()"
+
     cur.execute(
-        """
-        insert into leads (
-            project_id,
-            company,
-            contact_name,
-            title,
-            phone,
-            email,
-            created_at
-        )
-        values (%s, %s, %s, %s, %s, %s, now())
+        f"""
+        insert into leads ({columns_sql})
+        values ({placeholders})
         """,
-        (
-            project_id,
-            lead["company"],
-            lead["contact_name"],
-            lead["title"],
-            lead["phone"],
-            lead["email"],
-        ),
+        values,
     )
 
 
@@ -228,30 +275,28 @@ def main():
     conn = psycopg.connect(DATABASE_URL)
     cur = conn.cursor()
 
+    leads_columns = get_columns(cur, "leads")
+
+    if "company" not in leads_columns:
+        raise ValueError("leads table must have a company column")
+
     projects = get_projects(cur)
 
     inserted = 0
     skipped = 0
 
     for project in projects:
-        project_id = project["project_id"]
-        company = clean_text(project["company"])
-
-        if not company:
-            skipped += 1
-            continue
-
-        lead = make_placeholder_lead(company)
+        lead = build_lead(project)
 
         if not lead:
             skipped += 1
             continue
 
-        if lead_exists(cur, project_id, company):
+        if lead_exists(cur, leads_columns, project):
             skipped += 1
             continue
 
-        insert_lead(cur, project_id, lead)
+        insert_lead(cur, leads_columns, lead)
         inserted += 1
 
     conn.commit()
