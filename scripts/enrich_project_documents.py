@@ -1,7 +1,5 @@
 import os
-import requests
 import psycopg2 as psycopg
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,12 +13,13 @@ cur.execute("""
 select
     id,
     canonical_project_name,
-    source_url,
     permit_description,
-    raw_text
+    raw_text,
+    infrastructure_type,
+    intelligence_category,
+    project_stage
 from projects
-where source_url is not null
-limit 100
+limit 500
 """)
 
 rows = cur.fetchall()
@@ -28,21 +27,27 @@ rows = cur.fetchall()
 for row in rows:
 
     project_id = row[0]
-    project_name = row[1]
-    source_url = row[2]
-    permit_description = row[3] or ""
-    raw_text = row[4] or ""
+    project_name = row[1] or ""
+    permit_description = row[2] or ""
+    raw_text = row[3] or ""
+    infrastructure_type = row[4] or ""
+    intelligence_category = row[5] or ""
+    project_stage = row[6] or ""
 
-    combined = f"{project_name} {permit_description} {raw_text}"
+    combined = f"""
+    {project_name}
+    {permit_description}
+    {raw_text}
+    {infrastructure_type}
+    {intelligence_category}
+    """
 
-    summary = combined[:1500]
+    text_lower = combined.lower()
 
     engineering_firm = None
     legal_firm = None
     utility_dependency = None
     estimated_power_mw = None
-
-    text_lower = combined.lower()
 
     if "dominion" in text_lower:
         utility_dependency = "Dominion Energy"
@@ -67,25 +72,44 @@ for row in rows:
     if "substation" in text_lower:
         risk_flags.append("Transmission Dependency")
 
-    if "rezoning" in text_lower:
-        risk_flags.append("Zoning Approval Risk")
-
     if "water" in text_lower:
         risk_flags.append("Water Infrastructure Dependency")
 
+    if "rezoning" in text_lower:
+        risk_flags.append("Zoning Approval Risk")
+
+    if infrastructure_type == "Data Center":
+        estimated_power_mw = 150
+
+    if "hyperscale" in text_lower:
+        estimated_power_mw = 300
+
     strategic_notes = f"""
-    Executive Infrastructure Assessment:
+Executive Infrastructure Assessment
 
-    Project classified as:
-    {project_name}
+Project:
+{project_name}
 
-    Potential infrastructure dependencies detected.
+Classification:
+{intelligence_category}
 
-    Recommend:
-    - utility relationship mapping
-    - contractor ecosystem analysis
-    - hyperscale expansion monitoring
-    """
+Infrastructure Type:
+{infrastructure_type}
+
+Current Stage:
+{project_stage}
+
+Strategic Assessment:
+This project has potential infrastructure ecosystem implications.
+
+Recommended Actions:
+- Monitor utility expansion activity
+- Track hyperscale growth indicators
+- Evaluate supplier/vendor alignment
+- Monitor transmission and fiber dependencies
+"""
+
+    document_summary = combined[:2000]
 
     cur.execute("""
     update projects
@@ -94,14 +118,16 @@ for row in rows:
         engineering_firm = %s,
         legal_firm = %s,
         utility_dependency = %s,
+        estimated_power_mw = %s,
         risk_flags = %s,
         strategic_notes = %s
     where id = %s
     """, (
-        summary,
+        document_summary,
         engineering_firm,
         legal_firm,
         utility_dependency,
+        estimated_power_mw,
         ", ".join(risk_flags),
         strategic_notes,
         project_id
@@ -111,4 +137,4 @@ conn.commit()
 cur.close()
 conn.close()
 
-print("Document enrichment complete")
+print("AI enrichment complete")
