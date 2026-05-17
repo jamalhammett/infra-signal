@@ -141,14 +141,26 @@ def capture_stage(score):
 
 def map_color(score):
     if score >= 90:
-        return [0, 180, 120, 210]      # Emerald
+        return [0, 180, 120, 220]
     if score >= 75:
-        return [20, 80, 180, 210]      # Deep Blue
+        return [20, 80, 180, 220]
     if score >= 50:
-        return [0, 180, 200, 210]      # Teal
+        return [0, 180, 200, 220]
     if score >= 25:
-        return [100, 120, 140, 190]    # Slate
-    return [55, 60, 70, 160]           # Graphite
+        return [100, 120, 140, 200]
+    return [55, 60, 70, 170]
+
+
+def map_radius(score):
+    if score >= 90:
+        return 1800
+    if score >= 75:
+        return 1400
+    if score >= 50:
+        return 1100
+    if score >= 25:
+        return 850
+    return 650
 
 
 user = login_gate()
@@ -158,7 +170,7 @@ st.sidebar.header("Executive Filters")
 time_horizon = st.sidebar.selectbox(
     "Intelligence Timeline",
     ["30 Days", "90 Days", "12 Months", "24 Months", "All Intelligence"],
-    index=2
+    index=4,
 )
 
 projects_df = get_projects(time_horizon)
@@ -168,6 +180,7 @@ if not projects_df.empty:
     projects_df["early_capture_score"] = projects_df["early_capture_score"].fillna(0).astype(int)
     projects_df["capture_stage"] = projects_df["early_capture_score"].apply(capture_stage)
     projects_df["map_color"] = projects_df["early_capture_score"].apply(map_color)
+    projects_df["map_radius"] = projects_df["early_capture_score"].apply(map_radius)
 
 filtered_df = projects_df.copy()
 
@@ -221,37 +234,49 @@ st.title("Infrastructure Intelligence Platform")
 st.markdown("Allen Hammett AI — Executive Infrastructure / Early Capture Intelligence")
 
 st.markdown("### Capture Intelligence Legend")
-legend_cols = st.columns(5)
 
-legend_cols[0].success("Prime Positioning\n90–100")
-legend_cols[1].info("Strategic Development\n75–89")
+legend_cols = st.columns(5)
+legend_cols[0].success("Prime Positioning 90–100")
+legend_cols[1].info("Strategic Development 75–89")
 legend_cols[2].markdown("**Active Monitoring**  \n50–74")
 legend_cols[3].markdown("**Early Identification**  \n25–49")
 legend_cols[4].markdown("**Historical Context**  \n0–24")
 
 col1, col2, col3, col4, col5 = st.columns(5)
 
+mapped_df = filtered_df.copy()
+
+if not mapped_df.empty:
+    mapped_df["latitude"] = pd.to_numeric(mapped_df["latitude"], errors="coerce")
+    mapped_df["longitude"] = pd.to_numeric(mapped_df["longitude"], errors="coerce")
+    mapped_df = mapped_df.dropna(subset=["latitude", "longitude"])
+    mapped_df = mapped_df[
+        (mapped_df["latitude"].between(36, 40.5))
+        & (mapped_df["longitude"].between(-84, -75))
+    ]
+
 col1.metric("Qualified Signals", len(filtered_df))
 col2.metric("Prime Positioning", len(filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]) if not filtered_df.empty else 0)
 col3.metric("Predictive Signals", len(filtered_df[filtered_df["predictive_signal"] == True]) if not filtered_df.empty else 0)
-col4.metric("Mapped Records", len(filtered_df.dropna(subset=["latitude", "longitude"])) if not filtered_df.empty else 0)
+col4.metric("Mapped Records", len(mapped_df))
 col5.metric("Leads", len(leads_df))
 
 st.markdown("## Infrastructure Intelligence Map")
 
-map_df = filtered_df.dropna(subset=["latitude", "longitude"]).copy()
+if not mapped_df.empty:
+    map_df = mapped_df.rename(columns={"latitude": "lat", "longitude": "lon"}).copy()
 
-if not map_df.empty:
-    map_df = map_df.rename(columns={"latitude": "lat", "longitude": "lon"})
+    center_lat = float(map_df["lat"].median())
+    center_lon = float(map_df["lon"].median())
 
     st.pydeck_chart(
         pdk.Deck(
-            map_style="mapbox://styles/mapbox/dark-v10",
+            map_style=pdk.map_styles.CARTO_DARK,
             initial_view_state=pdk.ViewState(
-                latitude=39.0438,
-                longitude=-77.4874,
-                zoom=8,
-                pitch=40,
+                latitude=center_lat,
+                longitude=center_lon,
+                zoom=9,
+                pitch=35,
             ),
             layers=[
                 pdk.Layer(
@@ -259,7 +284,7 @@ if not map_df.empty:
                     data=map_df,
                     get_position="[lon, lat]",
                     get_color="map_color",
-                    get_radius=1000,
+                    get_radius="map_radius",
                     pickable=True,
                     auto_highlight=True,
                 )
@@ -278,6 +303,22 @@ if not map_df.empty:
             },
         )
     )
+
+    with st.expander("Mapped Records Preview"):
+        st.dataframe(
+            map_df[
+                [
+                    "canonical_project_name",
+                    "capture_stage",
+                    "early_capture_score",
+                    "county",
+                    "lat",
+                    "lon",
+                ]
+            ],
+            use_container_width=True,
+        )
+
 else:
     st.warning("No mapped records found for the current filters.")
 
@@ -308,7 +349,6 @@ display_cols = [
 ]
 
 existing_cols = [c for c in display_cols if c in filtered_df.columns]
-
 st.dataframe(filtered_df[existing_cols], use_container_width=True)
 
 st.markdown("## Infrastructure Leads")
