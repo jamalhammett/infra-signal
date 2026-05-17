@@ -1,7 +1,5 @@
 name: Update Infrastructure Signals
 
-on:name: Update Infrastructure Signals
-
 on:
   schedule:
     - cron: "0 * * * *"
