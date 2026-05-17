@@ -1,5 +1,4 @@
 import os
-
 import psycopg2 as psycopg
 from dotenv import load_dotenv
 
@@ -8,142 +7,308 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL was not found in .env")
-
-BATCH_SIZE = 50
+    raise ValueError("DATABASE_URL not found")
 
 
-def score_project(project_type: str | None, project_stage: str | None, description: str | None) -> int:
-    score = 0
-    text = (description or "").lower()
-    ptype = (project_type or "").lower()
-    pstage = (project_stage or "").lower()
+KEYWORDS = {
+    "data_center": [
+        "data center",
+        "datacenter",
+        "hyperscale",
+        "server farm",
+        "digital realty",
+        "qts",
+        "cyrusone",
+        "equinix",
+        "vantage",
+        "aligned",
+        "stack",
+    ],
 
-    if "data center" in text:
-        score += 50
-    if "warehouse" in text:
-        score += 30
-    if "commercial" in text:
-        score += 20
-    if "rezoning" in ptype or "rezoning" in text:
-        score += 15
-    if "site plan" in ptype:
-        score += 10
-    if "approved" in pstage:
-        score += 10
-    if "in review" in pstage:
-        score += 5
+    "utility": [
+        "substation",
+        "transmission",
+        "switchyard",
+        "dominion",
+        "novec",
+        "power",
+        "electric",
+        "energy",
+        "utility",
+    ],
 
-    return score
+    "fiber": [
+        "fiber",
+        "telecom",
+        "broadband",
+        "dark fiber",
+    ],
+}
 
 
-def get_connection():
-    return psycopg.connect(
-        DATABASE_URL,
-        connect_timeout=20,
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
+def classify_project(text):
+
+    text = (text or "").lower()
+
+    if any(k in text for k in KEYWORDS["data_center"]):
+        return (
+            "Hyperscale Expansion",
+            "Data Center",
+            "Northern Virginia Hyperscale Corridor",
+            "Ashburn",
+            80,
+            True,
+            False,
+            False,
+        )
+
+    if any(k in text for k in KEYWORDS["utility"]):
+        return (
+            "Utility Capacity Expansion",
+            "Utility Infrastructure",
+            "Northern Virginia Power Corridor",
+            "Loudoun",
+            70,
+            False,
+            True,
+            False,
+        )
+
+    if any(k in text for k in KEYWORDS["fiber"]):
+        return (
+            "Connectivity Expansion",
+            "Fiber Infrastructure",
+            "Northern Virginia Fiber Corridor",
+            "Ashburn",
+            65,
+            False,
+            False,
+            True,
+        )
+
+    return (
+        "General Infrastructure",
+        "General Infrastructure",
+        "Northern Virginia Infrastructure Region",
+        "Loudoun",
+        10,
+        False,
+        False,
+        False,
     )
 
 
 def main():
-    total_inserted = 0
 
-    while True:
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("set statement_timeout = 0")
+    conn = psycopg.connect(DATABASE_URL)
+    cur = conn.cursor()
 
-                cur.execute(
-                    """
-                    select
-                        s.case_number,
-                        s.project_name,
-                        s.project_description,
-                        s.county,
-                        s.state,
-                        s.project_type,
-                        s.project_stage
-                    from signals s
-                    left join projects p
-                        on p.case_number = s.case_number
-                    where p.case_number is null
-                      and s.case_number is not null
-                    order by s.created_at, s.case_number
-                    limit %s
-                    """,
-                    (BATCH_SIZE,)
-                )
+    cur.execute(
+        """
+        select
+            id,
+            case_number,
+            project_name,
+            project_description,
+            applicant_name,
+            owner_name,
+            contractor_name,
+            parcel_id,
+            address_raw,
+            county,
+            state,
+            project_type,
+            project_stage,
+            hearing_date,
+            estimated_value,
+            latitude,
+            longitude,
+            created_at
 
-                rows = cur.fetchall()
+        from signals
 
-                if not rows:
-                    print("No more new signals to promote.", flush=True)
-                    break
+        where promoted_to_project is distinct from true
+        """
+    )
 
-                for row in rows:
-                    case_number, project_name, description, county, state, project_type, project_stage = row
+    rows = cur.fetchall()
 
-                    if project_name and "test" not in project_name.lower():
-                        canonical_project_name = project_name
-                    else:
-                        canonical_project_name = case_number
+    inserted = 0
 
-                    opportunity_score = score_project(project_type, project_stage, description)
+    for row in rows:
 
-                    cur.execute(
-                        """
-                        insert into projects (
-                            case_number,
-                            canonical_project_name,
-                            county,
-                            state,
-                            project_type,
-                            project_stage,
-                            confidence_score,
-                            opportunity_score,
-                            first_seen_at,
-                            last_seen_at,
-                            created_at,
-                            description
-                        )
-                        values (%s, %s, %s, %s, %s, %s, %s, %s, now(), now(), now(), %s)
-                        on conflict (case_number) do update
-                        set
-                            canonical_project_name = excluded.canonical_project_name,
-                            county = excluded.county,
-                            state = excluded.state,
-                            project_type = excluded.project_type,
-                            project_stage = excluded.project_stage,
-                            confidence_score = excluded.confidence_score,
-                            opportunity_score = excluded.opportunity_score,
-                            last_seen_at = now(),
-                            description = excluded.description
-                        """,
-                        (
-                            case_number,
-                            canonical_project_name,
-                            county,
-                            state,
-                            project_type,
-                            project_stage,
-                            90,
-                            opportunity_score,
-                            description,
-                        )
-                    )
+        signal_id = row[0]
+        case_number = row[1]
+        project_name = row[2]
+        description = row[3]
+        applicant_name = row[4]
+        owner_name = row[5]
+        contractor_name = row[6]
+        parcel_id = row[7]
+        address_raw = row[8]
+        county = row[9]
+        state = row[10]
+        project_type = row[11]
+        project_stage = row[12]
+        hearing_date = row[13]
+        estimated_value = row[14]
+        latitude = row[15]
+        longitude = row[16]
+        created_at = row[17]
 
-                conn.commit()
+        combined_text = " ".join(
+            [
+                str(project_name or ""),
+                str(description or ""),
+                str(project_type or ""),
+            ]
+        )
 
-                total_inserted += len(rows)
-                print(
-                    f"Promoted batch of {len(rows)} | Total promoted this run: {total_inserted}",
-                    flush=True
-                )
+        (
+            intelligence_category,
+            infrastructure_type,
+            corridor_region,
+            market_cluster,
+            score,
+            hyperscale_related,
+            utility_related,
+            fiber_related,
+        ) = classify_project(combined_text)
 
-    print(f"Finished. Total promoted this run: {total_inserted}", flush=True)
+        predictive_signal = score >= 60
+
+        cur.execute(
+            """
+            insert into projects (
+
+                signal_id,
+                case_number,
+                canonical_project_name,
+                permit_description,
+
+                applicant_name,
+                owner_name,
+                contractor_name,
+
+                parcel_id,
+                address_raw,
+
+                county,
+                state,
+
+                project_type,
+                project_stage,
+
+                hearing_date,
+                estimated_value,
+
+                intelligence_category,
+                infrastructure_type,
+                corridor_region,
+                market_cluster,
+
+                early_capture_score,
+                predictive_signal,
+
+                hyperscale_related,
+                utility_related,
+                fiber_related,
+
+                latitude,
+                longitude,
+
+                source_name,
+                source_type,
+
+                raw_text,
+
+                created_at
+
+            )
+
+            values (
+
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s, %s, %s,
+                %s, %s,
+                %s, %s, %s,
+                %s, %s,
+                %s, %s,
+                %s,
+                %s
+
+            )
+
+            on conflict do nothing
+            """,
+            (
+                signal_id,
+                case_number,
+                project_name,
+                description,
+
+                applicant_name,
+                owner_name,
+                contractor_name,
+
+                parcel_id,
+                address_raw,
+
+                county,
+                state,
+
+                project_type,
+                project_stage,
+
+                hearing_date,
+                estimated_value,
+
+                intelligence_category,
+                infrastructure_type,
+                corridor_region,
+                market_cluster,
+
+                score,
+                predictive_signal,
+
+                hyperscale_related,
+                utility_related,
+                fiber_related,
+
+                latitude,
+                longitude,
+
+                "Loudoun County Land Applications",
+                "County Planning Feed",
+
+                combined_text,
+
+                created_at,
+            ),
+        )
+
+        cur.execute(
+            """
+            update signals
+            set promoted_to_project = true
+            where id = %s
+            """,
+            (signal_id,),
+        )
+
+        inserted += 1
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    print(f"Promoted {inserted} signals to projects", flush=True)
 
 
 if __name__ == "__main__":
