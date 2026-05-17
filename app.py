@@ -13,43 +13,12 @@ st.set_page_config(
     layout="wide"
 )
 
-TARGET_KEYWORDS = [
-    "data center", "datacenter", "hyperscale", "cloud", "server",
-    "substation", "switchyard", "transmission", "utility",
-    "power", "energy", "fiber", "telecom", "industrial"
-]
-
-EXCLUDED_KEYWORDS = [
-    "sidewalk", "trail", "path", "driveway", "subdivision",
-    "townhome", "townhomes", "single family", "residential",
-    "lot ", "lots", "farm", "vineyard", "conservancy",
-    "school", "church", "playground", "park", "landscape",
-    "forest", "stormwater", "road widening", "firehouse",
-    "barrister", "golden", "auto world"
-]
-
-DIRECT_KEYWORDS = [
-    "data center", "datacenter", "hyperscale", "cloud", "server",
-    "campus", "colo", "colocation"
-]
-
-UPSTREAM_KEYWORDS = [
-    "substation", "switchyard", "transmission", "power",
-    "energy", "utility", "novec", "dominion"
-]
-
-INDUSTRIAL_KEYWORDS = [
-    "industrial", "warehouse", "logistics", "manufacturing"
-]
-
-
 def run_query(sql: str, params=None) -> pd.DataFrame:
     conn = psycopg.connect(DATABASE_URL)
     try:
         return pd.read_sql(sql, conn, params=params)
     finally:
         conn.close()
-
 
 def authenticate(email, password):
     df = run_query(
@@ -62,12 +31,9 @@ def authenticate(email, password):
         """,
         (email.strip(), password),
     )
-
     if df.empty:
         return None
-
     return df.iloc[0].to_dict()
-
 
 def login_gate():
     if "user" not in st.session_state:
@@ -84,7 +50,6 @@ def login_gate():
 
     if st.button("Login"):
         user = authenticate(email, password)
-
         if user:
             st.session_state.user = user
             st.rerun()
@@ -92,85 +57,6 @@ def login_gate():
             st.error("Invalid credentials")
 
     st.stop()
-
-
-def is_qualified_project(row):
-    text = " ".join([str(v) for v in row.fillna("").values]).lower()
-
-    if any(bad in text for bad in EXCLUDED_KEYWORDS):
-        return False
-
-    return any(good in text for good in TARGET_KEYWORDS)
-
-
-def classify_category(row):
-    text = " ".join([str(v) for v in row.fillna("").values]).lower()
-
-    if any(k in text for k in DIRECT_KEYWORDS):
-        return "Direct Opportunity"
-
-    if any(k in text for k in UPSTREAM_KEYWORDS):
-        return "Upstream Infrastructure Signal"
-
-    if any(k in text for k in INDUSTRIAL_KEYWORDS):
-        return "Industrial Infrastructure"
-
-    return "Watchlist"
-
-
-def opportunity_score(row):
-    text = " ".join([str(v) for v in row.fillna("").values]).lower()
-    score = 0
-
-    if "data center" in text or "datacenter" in text:
-        score += 45
-
-    if any(k in text for k in ["cyrusone", "vantage", "qts", "digital realty", "stack", "equinix", "cologix", "coresite", "aligned"]):
-        score += 30
-
-    if any(k in text for k in ["substation", "transmission", "switchyard", "novec", "dominion"]):
-        score += 25
-
-    if any(k in text for k in ["approved", "in review", "submitted", "pending"]):
-        score += 15
-
-    if any(k in text for k in ["industrial", "warehouse", "fiber", "telecom"]):
-        score += 10
-
-    if any(bad in text for bad in EXCLUDED_KEYWORDS):
-        score -= 100
-
-    return max(score, 0)
-
-
-def priority_label(score):
-    if score >= 80:
-        return "HIGH"
-    if score >= 55:
-        return "MEDIUM"
-    if score >= 30:
-        return "WATCHLIST"
-    return "LOW"
-
-
-def recommended_action(row):
-    category = row.get("intelligence_category", "")
-    score = row.get("opportunity_score", 0)
-
-    if category == "Direct Opportunity" and score >= 80:
-        return "Prioritize BD outreach and identify project delivery / procurement stakeholders."
-
-    if category == "Direct Opportunity":
-        return "Track for BD positioning and identify owner, developer, and contractor relationships."
-
-    if category == "Upstream Infrastructure Signal":
-        return "Monitor as early capture intelligence. Correlate with future data center, utility, and land development filings."
-
-    if category == "Industrial Infrastructure":
-        return "Evaluate for contractor, equipment, and supplier demand."
-
-    return "Keep on watchlist until additional activity confirms value."
-
 
 def get_projects():
     sql = """
@@ -183,32 +69,24 @@ def get_projects():
         state,
         source_name,
         source_type,
+        intelligence_category,
+        infrastructure_type,
+        strategic_priority,
+        corridor_region,
+        market_cluster,
+        early_capture_score,
+        predictive_signal,
+        utility_related,
+        hyperscale_related,
+        transmission_related,
+        fiber_related,
         created_at
     from projects
     where created_at >= now() - interval '90 days'
-    order by created_at desc
+    order by early_capture_score desc nulls last, created_at desc
     limit 2000
     """
-
-    df = run_query(sql)
-
-    if df.empty:
-        return df
-
-    df = df[df.apply(is_qualified_project, axis=1)].copy()
-
-    df["intelligence_category"] = df.apply(classify_category, axis=1)
-    df["opportunity_score"] = df.apply(opportunity_score, axis=1)
-    df["priority"] = df["opportunity_score"].apply(priority_label)
-    df["recommended_action"] = df.apply(recommended_action, axis=1)
-
-    df = df.sort_values(
-        by=["opportunity_score", "created_at"],
-        ascending=[False, False]
-    )
-
-    return df
-
+    return run_query(sql)
 
 def get_leads():
     sql = """
@@ -226,9 +104,7 @@ def get_leads():
     order by created_at desc
     limit 250
     """
-
     return run_query(sql)
-
 
 user = login_gate()
 
@@ -236,62 +112,75 @@ projects_df = get_projects()
 leads_df = get_leads()
 filtered_df = projects_df.copy()
 
-st.sidebar.header("Infrastructure Intelligence Filters")
+st.sidebar.header("Executive Filters")
+
+search_term = st.sidebar.text_input("Search keyword")
+
+predictive_only = st.sidebar.checkbox("Predictive signals only")
+
+high_priority_only = st.sidebar.checkbox("High priority only")
 
 if not projects_df.empty:
     county_options = ["All"] + sorted(projects_df["county"].dropna().unique().tolist())
-    state_options = ["All"] + sorted(projects_df["state"].dropna().unique().tolist())
-    source_options = ["All"] + sorted(projects_df["source_name"].dropna().unique().tolist())
-    stage_options = ["All"] + sorted(projects_df["project_stage"].dropna().unique().tolist())
     category_options = ["All"] + sorted(projects_df["intelligence_category"].dropna().unique().tolist())
-    priority_options = ["All"] + sorted(projects_df["priority"].dropna().unique().tolist())
+    priority_options = ["All"] + sorted(projects_df["strategic_priority"].dropna().unique().tolist())
+    corridor_options = ["All"] + sorted(projects_df["corridor_region"].dropna().unique().tolist())
+    stage_options = ["All"] + sorted(projects_df["project_stage"].dropna().unique().tolist())
 
     county_filter = st.sidebar.selectbox("County", county_options)
-    state_filter = st.sidebar.selectbox("State", state_options)
-    source_filter = st.sidebar.selectbox("Source", source_options)
-    stage_filter = st.sidebar.selectbox("Stage", stage_options)
     category_filter = st.sidebar.selectbox("Intelligence Category", category_options)
-    priority_filter = st.sidebar.selectbox("Priority", priority_options)
+    priority_filter = st.sidebar.selectbox("Strategic Priority", priority_options)
+    corridor_filter = st.sidebar.selectbox("Corridor Region", corridor_options)
+    stage_filter = st.sidebar.selectbox("Stage", stage_options)
 
     if county_filter != "All":
         filtered_df = filtered_df[filtered_df["county"] == county_filter]
-
-    if state_filter != "All":
-        filtered_df = filtered_df[filtered_df["state"] == state_filter]
-
-    if source_filter != "All":
-        filtered_df = filtered_df[filtered_df["source_name"] == source_filter]
-
-    if stage_filter != "All":
-        filtered_df = filtered_df[filtered_df["project_stage"] == stage_filter]
 
     if category_filter != "All":
         filtered_df = filtered_df[filtered_df["intelligence_category"] == category_filter]
 
     if priority_filter != "All":
-        filtered_df = filtered_df[filtered_df["priority"] == priority_filter]
+        filtered_df = filtered_df[filtered_df["strategic_priority"] == priority_filter]
 
+    if corridor_filter != "All":
+        filtered_df = filtered_df[filtered_df["corridor_region"] == corridor_filter]
+
+    if stage_filter != "All":
+        filtered_df = filtered_df[filtered_df["project_stage"] == stage_filter]
+
+    if predictive_only:
+        filtered_df = filtered_df[filtered_df["predictive_signal"] == True]
+
+    if high_priority_only:
+        filtered_df = filtered_df[filtered_df["strategic_priority"] == "HIGH"]
+
+    if search_term:
+        mask = filtered_df.astype(str).apply(
+            lambda row: row.str.contains(search_term, case=False, na=False).any(),
+            axis=1
+        )
+        filtered_df = filtered_df[mask]
 
 st.title("Infrastructure Intelligence Platform")
-st.markdown("Allen Hammett AI — Executive Infrastructure / Data Center Intelligence")
+st.markdown("Allen Hammett AI — Executive Infrastructure / Early Capture Intelligence")
 
-high_count = len(filtered_df[filtered_df["priority"] == "HIGH"]) if not filtered_df.empty else 0
-direct_count = len(filtered_df[filtered_df["intelligence_category"] == "Direct Opportunity"]) if not filtered_df.empty else 0
-upstream_count = len(filtered_df[filtered_df["intelligence_category"] == "Upstream Infrastructure Signal"]) if not filtered_df.empty else 0
+col1, col2, col3, col4, col5 = st.columns(5)
 
-col1, col2, col3, col4 = st.columns(4)
+col1.metric("Qualified Signals", len(filtered_df))
+col2.metric("High Priority", len(filtered_df[filtered_df["strategic_priority"] == "HIGH"]) if not filtered_df.empty else 0)
+col3.metric("Predictive Signals", len(filtered_df[filtered_df["predictive_signal"] == True]) if not filtered_df.empty else 0)
+col4.metric("Upstream Utility", len(filtered_df[filtered_df["utility_related"] == True]) if not filtered_df.empty else 0)
+col5.metric("Leads", len(leads_df))
 
-col1.metric("Qualified Opportunities", len(filtered_df))
-col2.metric("High Priority", high_count)
-col3.metric("Direct Opportunities", direct_count)
-col4.metric("Upstream Signals", upstream_count)
-
-st.markdown("## Executive Priority Opportunities")
+st.markdown("## Executive Priority Intelligence")
 
 display_cols = [
-    "priority",
-    "opportunity_score",
+    "strategic_priority",
+    "early_capture_score",
     "intelligence_category",
+    "infrastructure_type",
+    "corridor_region",
+    "market_cluster",
     "case_number",
     "canonical_project_name",
     "project_stage",
@@ -299,14 +188,18 @@ display_cols = [
     "county",
     "state",
     "source_name",
-    "recommended_action",
+    "predictive_signal",
+    "utility_related",
+    "hyperscale_related",
+    "transmission_related",
+    "fiber_related",
     "created_at",
 ]
 
-existing_display_cols = [c for c in display_cols if c in filtered_df.columns]
+existing_cols = [c for c in display_cols if c in filtered_df.columns]
 
 st.dataframe(
-    filtered_df[existing_display_cols],
+    filtered_df[existing_cols],
     use_container_width=True
 )
 
@@ -320,18 +213,16 @@ st.dataframe(
 st.markdown("## Export Intelligence")
 
 if not filtered_df.empty:
-    project_csv = filtered_df.to_csv(index=False).encode("utf-8")
-
+    opportunities_csv = filtered_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download Opportunities CSV",
-        data=project_csv,
-        file_name="infrastructure_opportunities.csv",
+        data=opportunities_csv,
+        file_name="executive_infrastructure_opportunities.csv",
         mime="text/csv"
     )
 
 if not leads_df.empty:
     leads_csv = leads_df.to_csv(index=False).encode("utf-8")
-
     st.download_button(
         label="Download Leads CSV",
         data=leads_csv,
@@ -343,4 +234,4 @@ if st.button("Sign Out"):
     st.session_state.user = None
     st.rerun()
 
-st.caption("Allen Hammett AI • Infrastructure Intelligence System")
+st.caption("Allen Hammett AI • Infrastructure Early Capture Intelligence System")
