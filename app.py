@@ -62,38 +62,49 @@ def login_gate():
     st.stop()
 
 
-def get_projects():
-    return run_query(
-        """
-        select
-            case_number,
-            canonical_project_name,
-            project_stage,
-            project_type,
-            county,
-            state,
-            source_name,
-            source_type,
-            intelligence_category,
-            infrastructure_type,
-            strategic_priority,
-            corridor_region,
-            market_cluster,
-            early_capture_score,
-            predictive_signal,
-            utility_related,
-            hyperscale_related,
-            transmission_related,
-            fiber_related,
-            latitude,
-            longitude,
-            created_at
-        from projects
-        where created_at >= now() - interval '90 days'
-        order by early_capture_score desc nulls last, created_at desc
-        limit 2000
-        """
-    )
+def get_projects(time_horizon):
+    interval_map = {
+        "30 Days": "30 days",
+        "90 Days": "90 days",
+        "12 Months": "12 months",
+        "24 Months": "24 months",
+    }
+
+    where_clause = ""
+    if time_horizon in interval_map:
+        where_clause = f"where created_at >= now() - interval '{interval_map[time_horizon]}'"
+
+    sql = f"""
+    select
+        case_number,
+        canonical_project_name,
+        project_stage,
+        project_type,
+        county,
+        state,
+        source_name,
+        source_type,
+        intelligence_category,
+        infrastructure_type,
+        strategic_priority,
+        corridor_region,
+        market_cluster,
+        early_capture_score,
+        predictive_signal,
+        utility_related,
+        hyperscale_related,
+        transmission_related,
+        fiber_related,
+        latitude,
+        longitude,
+        created_at
+    from projects
+    {where_clause}
+    order by early_capture_score desc nulls last, created_at desc
+    limit 5000
+    """
+
+    return run_query(sql)
 
 
 def get_leads():
@@ -116,44 +127,75 @@ def get_leads():
     )
 
 
-user = login_gate()
+def capture_stage(score):
+    if score >= 90:
+        return "Prime Positioning"
+    if score >= 75:
+        return "Strategic Development"
+    if score >= 50:
+        return "Active Monitoring"
+    if score >= 25:
+        return "Early Identification"
+    return "Historical Context"
 
-projects_df = get_projects()
-leads_df = get_leads()
-filtered_df = projects_df.copy()
+
+def map_color(score):
+    if score >= 90:
+        return [0, 180, 120, 210]      # Emerald
+    if score >= 75:
+        return [20, 80, 180, 210]      # Deep Blue
+    if score >= 50:
+        return [0, 180, 200, 210]      # Teal
+    if score >= 25:
+        return [100, 120, 140, 190]    # Slate
+    return [55, 60, 70, 160]           # Graphite
+
+
+user = login_gate()
 
 st.sidebar.header("Executive Filters")
 
+time_horizon = st.sidebar.selectbox(
+    "Intelligence Timeline",
+    ["30 Days", "90 Days", "12 Months", "24 Months", "All Intelligence"],
+    index=2
+)
+
+projects_df = get_projects(time_horizon)
+leads_df = get_leads()
+
+if not projects_df.empty:
+    projects_df["early_capture_score"] = projects_df["early_capture_score"].fillna(0).astype(int)
+    projects_df["capture_stage"] = projects_df["early_capture_score"].apply(capture_stage)
+    projects_df["map_color"] = projects_df["early_capture_score"].apply(map_color)
+
+filtered_df = projects_df.copy()
+
 search_term = st.sidebar.text_input("Search keyword")
 predictive_only = st.sidebar.checkbox("Predictive signals only")
-high_priority_only = st.sidebar.checkbox("High priority only")
+prime_only = st.sidebar.checkbox("Prime positioning only")
 
 if not projects_df.empty:
     county_options = ["All"] + sorted(projects_df["county"].dropna().unique().tolist())
-    state_options = ["All"] + sorted(projects_df["state"].dropna().unique().tolist())
     category_options = ["All"] + sorted(projects_df["intelligence_category"].dropna().unique().tolist())
-    priority_options = ["All"] + sorted(projects_df["strategic_priority"].dropna().unique().tolist())
+    capture_options = ["All"] + sorted(projects_df["capture_stage"].dropna().unique().tolist())
     corridor_options = ["All"] + sorted(projects_df["corridor_region"].dropna().unique().tolist())
     stage_options = ["All"] + sorted(projects_df["project_stage"].dropna().unique().tolist())
 
     county_filter = st.sidebar.selectbox("County", county_options)
-    state_filter = st.sidebar.selectbox("State", state_options)
     category_filter = st.sidebar.selectbox("Intelligence Category", category_options)
-    priority_filter = st.sidebar.selectbox("Strategic Priority", priority_options)
+    capture_filter = st.sidebar.selectbox("Capture Stage", capture_options)
     corridor_filter = st.sidebar.selectbox("Corridor Region", corridor_options)
-    stage_filter = st.sidebar.selectbox("Stage", stage_options)
+    stage_filter = st.sidebar.selectbox("Project Stage", stage_options)
 
     if county_filter != "All":
         filtered_df = filtered_df[filtered_df["county"] == county_filter]
 
-    if state_filter != "All":
-        filtered_df = filtered_df[filtered_df["state"] == state_filter]
-
     if category_filter != "All":
         filtered_df = filtered_df[filtered_df["intelligence_category"] == category_filter]
 
-    if priority_filter != "All":
-        filtered_df = filtered_df[filtered_df["strategic_priority"] == priority_filter]
+    if capture_filter != "All":
+        filtered_df = filtered_df[filtered_df["capture_stage"] == capture_filter]
 
     if corridor_filter != "All":
         filtered_df = filtered_df[filtered_df["corridor_region"] == corridor_filter]
@@ -164,8 +206,8 @@ if not projects_df.empty:
     if predictive_only:
         filtered_df = filtered_df[filtered_df["predictive_signal"] == True]
 
-    if high_priority_only:
-        filtered_df = filtered_df[filtered_df["strategic_priority"] == "HIGH"]
+    if prime_only:
+        filtered_df = filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]
 
     if search_term:
         mask = filtered_df.astype(str).apply(
@@ -178,10 +220,19 @@ if not projects_df.empty:
 st.title("Infrastructure Intelligence Platform")
 st.markdown("Allen Hammett AI — Executive Infrastructure / Early Capture Intelligence")
 
+st.markdown("### Capture Intelligence Legend")
+legend_cols = st.columns(5)
+
+legend_cols[0].success("Prime Positioning\n90–100")
+legend_cols[1].info("Strategic Development\n75–89")
+legend_cols[2].markdown("**Active Monitoring**  \n50–74")
+legend_cols[3].markdown("**Early Identification**  \n25–49")
+legend_cols[4].markdown("**Historical Context**  \n0–24")
+
 col1, col2, col3, col4, col5 = st.columns(5)
 
 col1.metric("Qualified Signals", len(filtered_df))
-col2.metric("High Priority", len(filtered_df[filtered_df["strategic_priority"] == "HIGH"]) if not filtered_df.empty else 0)
+col2.metric("Prime Positioning", len(filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]) if not filtered_df.empty else 0)
 col3.metric("Predictive Signals", len(filtered_df[filtered_df["predictive_signal"] == True]) if not filtered_df.empty else 0)
 col4.metric("Mapped Records", len(filtered_df.dropna(subset=["latitude", "longitude"])) if not filtered_df.empty else 0)
 col5.metric("Leads", len(leads_df))
@@ -207,7 +258,7 @@ if not map_df.empty:
                     "ScatterplotLayer",
                     data=map_df,
                     get_position="[lon, lat]",
-                    get_color="[0, 255, 140, 190]",
+                    get_color="map_color",
                     get_radius=1000,
                     pickable=True,
                     auto_highlight=True,
@@ -216,9 +267,10 @@ if not map_df.empty:
             tooltip={
                 "html": """
                 <b>Project:</b> {canonical_project_name}<br/>
-                <b>Priority:</b> {strategic_priority}<br/>
+                <b>Capture Stage:</b> {capture_stage}<br/>
                 <b>Score:</b> {early_capture_score}<br/>
                 <b>Category:</b> {intelligence_category}<br/>
+                <b>Corridor:</b> {corridor_region}<br/>
                 <b>County:</b> {county}<br/>
                 <b>Stage:</b> {project_stage}
                 """,
@@ -232,7 +284,7 @@ else:
 st.markdown("## Executive Priority Intelligence")
 
 display_cols = [
-    "strategic_priority",
+    "capture_stage",
     "early_capture_score",
     "intelligence_category",
     "infrastructure_type",
@@ -260,7 +312,6 @@ existing_cols = [c for c in display_cols if c in filtered_df.columns]
 st.dataframe(filtered_df[existing_cols], use_container_width=True)
 
 st.markdown("## Infrastructure Leads")
-
 st.dataframe(leads_df, use_container_width=True)
 
 st.markdown("## Export Intelligence")
