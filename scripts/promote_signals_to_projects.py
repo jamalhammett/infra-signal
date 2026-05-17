@@ -121,8 +121,6 @@ def main():
             project_stage,
             hearing_date,
             estimated_value,
-            latitude,
-            longitude,
             created_at
 
         from signals
@@ -152,9 +150,7 @@ def main():
         project_stage = row[12]
         hearing_date = row[13]
         estimated_value = row[14]
-        latitude = row[15]
-        longitude = row[16]
-        created_at = row[17]
+        created_at = row[15]
 
         combined_text = " ".join(
             [
@@ -214,9 +210,6 @@ def main():
                 utility_related,
                 fiber_related,
 
-                latitude,
-                longitude,
-
                 source_name,
                 source_type,
 
@@ -237,7 +230,6 @@ def main():
                 %s, %s, %s, %s,
                 %s, %s,
                 %s, %s, %s,
-                %s, %s,
                 %s, %s,
                 %s,
                 %s
@@ -279,9 +271,6 @@ def main():
                 hyperscale_related,
                 utility_related,
                 fiber_related,
-
-                latitude,
-                longitude,
 
                 "Loudoun County Land Applications",
                 "County Planning Feed",
