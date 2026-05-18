@@ -40,5 +40,8 @@ jobs:
       - name: Tag Infrastructure Intelligence
         run: python scripts/tag_projects.py
 
+      - name: Enrich Project Documents
+        run: python scripts/enrich_project_documents.py
+
       - name: Geocode Projects
         run: python scripts/geocode_projects.py
