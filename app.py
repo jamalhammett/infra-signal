@@ -1,60 +1,47 @@
 import os
-import pandas as pd
 import streamlit as st
+import pandas as pd
 import psycopg2
 import pydeck as pdk
+from sqlalchemy import create_engine
 from dotenv import load_dotenv
+
+# =========================================================
+# LOAD ENVIRONMENT
+# =========================================================
 
 load_dotenv()
 
-st.set_page_config(page_title="Allen Hammett AI", layout="wide")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
+# =========================================================
+# PAGE CONFIG
+# =========================================================
 
+st.set_page_config(
+    page_title="Allen Hammett AI",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-def run_query(sql: str, params=None) -> pd.DataFrame:
-    conn = psycopg2.connect(DATABASE_URL)
-    try:
-        return pd.read_sql(sql, conn, params=params)
-    finally:
-        conn.close()
+# =========================================================
+# DATABASE CONNECTION
+# =========================================================
 
+engine = create_engine(DATABASE_URL)
 
-def get_columns(table_name):
-    df = run_query(
-        """
-        select column_name
-        from information_schema.columns
-        where table_schema = 'public'
-          and table_name = %s
-        """,
-        (table_name,),
-    )
-    return set(df["column_name"].tolist())
+# =========================================================
+# AUTHENTICATION
+# =========================================================
 
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
-def authenticate(email, password):
-    df = run_query(
-        """
-        select email, role
-        from users
-        where lower(email) = lower(%s)
-          and password = %s
-        limit 1
-        """,
-        (email.strip(), password),
-    )
-    if df.empty:
-        return None
-    return df.iloc[0].to_dict()
+VALID_USERS = {
+    "jamal.hammett@allenhammett.com": "AllenHammett2025!"
+}
 
-
-def login_gate():
-    if "user" not in st.session_state:
-        st.session_state.user = None
-
-    if st.session_state.user:
-        return st.session_state.user
+if not st.session_state.authenticated:
 
     st.title("Allen Hammett AI")
     st.subheader("Secure Infrastructure Intelligence Access")
@@ -62,361 +49,387 @@ def login_gate():
     with st.form("login_form"):
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
+
         submitted = st.form_submit_button("Login")
 
-    if submitted:
-        user = authenticate(email, password)
-        if user:
-            st.session_state.user = user
-            st.rerun()
-        else:
-            st.error("Invalid credentials")
+        if submitted:
+            if email in VALID_USERS and VALID_USERS[email] == password:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
 
     st.stop()
 
+# =========================================================
+# DATA ACCESS
+# =========================================================
 
-def get_projects(time_horizon):
-    cols = get_columns("projects")
+@st.cache_data(ttl=3600)
+def run_query(query):
+    return pd.read_sql(query, engine)
 
-    wanted_cols = [
-        "id",
-        "case_number",
-        "canonical_project_name",
-        "project_name",
-        "project_stage",
-        "project_type",
-        "county",
-        "state",
-        "source_name",
-        "source_type",
-        "source_url",
-        "intelligence_category",
-        "infrastructure_type",
-        "strategic_priority",
-        "corridor_region",
-        "market_cluster",
-        "early_capture_score",
-        "predictive_signal",
-        "utility_related",
-        "hyperscale_related",
-        "transmission_related",
-        "fiber_related",
-        "latitude",
-        "longitude",
-        "created_at",
-        "applicant_name",
-        "permit_description",
-        "source_document_url",
-        "filing_date",
-        "utility_provider",
-        "raw_text",
-    ]
+@st.cache_data(ttl=3600)
+def get_projects():
 
-    select_cols = [c for c in wanted_cols if c in cols]
-
-    if not select_cols:
-        return pd.DataFrame()
-
-    interval_map = {
-        "30 Days": "30 days",
-        "90 Days": "90 days",
-        "12 Months": "12 months",
-        "24 Months": "24 months",
-    }
-
-    where_clause = ""
-    if "created_at" in cols and time_horizon in interval_map:
-        where_clause = f"where created_at >= now() - interval '{interval_map[time_horizon]}'"
-
-    order_clause = ""
-    if "early_capture_score" in cols and "created_at" in cols:
-        order_clause = "order by early_capture_score desc nulls last, created_at desc"
-    elif "created_at" in cols:
-        order_clause = "order by created_at desc"
-
-    sql = f"""
-    select {", ".join(select_cols)}
+    query = """
+    select *
     from projects
-    {where_clause}
-    {order_clause}
+    order by early_capture_score desc nulls last
     limit 5000
     """
 
-    df = run_query(sql)
+    return run_query(query)
 
-    for c in wanted_cols:
-        if c not in df.columns:
-            df[c] = None
-
-    return df
-
-
+@st.cache_data(ttl=3600)
 def get_leads():
-    cols = get_columns("leads")
 
-    wanted_cols = [
-        "company",
-        "contact_name",
-        "title",
-        "email",
-        "phone",
-        "county",
-        "state",
-        "source_name",
-        "created_at",
-    ]
-
-    select_cols = [c for c in wanted_cols if c in cols]
-
-    if not select_cols:
-        return pd.DataFrame()
-
-    order_clause = "order by created_at desc" if "created_at" in cols else ""
-
-    sql = f"""
-    select {", ".join(select_cols)}
-    from leads
-    {order_clause}
-    limit 250
+    query = """
+    select *
+    from infrastructure_leads
+    order by created_at desc
+    limit 500
     """
 
-    df = run_query(sql)
+    return run_query(query)
 
-    for c in wanted_cols:
-        if c not in df.columns:
-            df[c] = None
-
-    return df
-
-
-def capture_stage(score):
-    if score >= 90:
-        return "Prime Positioning"
-    if score >= 75:
-        return "Strategic Development"
-    if score >= 50:
-        return "Active Monitoring"
-    if score >= 25:
-        return "Early Identification"
-    return "Historical Context"
-
-
-def map_color(score):
-    if score >= 90:
-        return [0, 180, 120, 220]
-    if score >= 75:
-        return [20, 80, 180, 220]
-    if score >= 50:
-        return [0, 180, 200, 220]
-    if score >= 25:
-        return [100, 120, 140, 200]
-    return [55, 60, 70, 170]
-
-
-def map_radius(score):
-    if score >= 90:
-        return 1800
-    if score >= 75:
-        return 1400
-    if score >= 50:
-        return 1100
-    if score >= 25:
-        return 850
-    return 650
-
-
-user = login_gate()
-
-st.sidebar.header("Executive Filters")
-
-time_horizon = st.sidebar.selectbox(
-    "Intelligence Timeline",
-    ["30 Days", "90 Days", "12 Months", "24 Months", "All Intelligence"],
-    index=4,
-)
-
-projects_df = get_projects(time_horizon)
+projects_df = get_projects()
 leads_df = get_leads()
 
-if not projects_df.empty:
-    projects_df["early_capture_score"] = pd.to_numeric(
-        projects_df["early_capture_score"], errors="coerce"
-    ).fillna(0).astype(int)
+# =========================================================
+# SIDEBAR FILTERS
+# =========================================================
 
-    projects_df["capture_stage"] = projects_df["early_capture_score"].apply(capture_stage)
-    projects_df["map_color"] = projects_df["early_capture_score"].apply(map_color)
-    projects_df["map_radius"] = projects_df["early_capture_score"].apply(map_radius)
+st.sidebar.title("Executive Filters")
 
-filtered_df = projects_df.copy()
+timeline_filter = st.sidebar.selectbox(
+    "Intelligence Timeline",
+    ["All Intelligence", "Recent 30 Days", "Recent 90 Days"]
+)
 
-search_term = st.sidebar.text_input("Search keyword")
+search_keyword = st.sidebar.text_input("Search keyword")
+
 predictive_only = st.sidebar.checkbox("Predictive signals only")
 prime_only = st.sidebar.checkbox("Prime positioning only")
 
-if not projects_df.empty:
-    county_options = ["All"] + sorted(projects_df["county"].dropna().astype(str).unique().tolist())
-    category_options = ["All"] + sorted(projects_df["intelligence_category"].dropna().astype(str).unique().tolist())
-    capture_options = ["All"] + sorted(projects_df["capture_stage"].dropna().astype(str).unique().tolist())
-    corridor_options = ["All"] + sorted(projects_df["corridor_region"].dropna().astype(str).unique().tolist())
-    stage_options = ["All"] + sorted(projects_df["project_stage"].dropna().astype(str).unique().tolist())
+county_options = ["All"] + sorted(
+    projects_df["county"].dropna().unique().tolist()
+)
 
-    county_filter = st.sidebar.selectbox("County", county_options)
-    category_filter = st.sidebar.selectbox("Intelligence Category", category_options)
-    capture_filter = st.sidebar.selectbox("Capture Stage", capture_options)
-    corridor_filter = st.sidebar.selectbox("Corridor Region", corridor_options)
-    stage_filter = st.sidebar.selectbox("Project Stage", stage_options)
+county_filter = st.sidebar.selectbox(
+    "County",
+    county_options
+)
 
-    if county_filter != "All":
-        filtered_df = filtered_df[filtered_df["county"].astype(str) == county_filter]
+category_options = ["All"] + sorted(
+    projects_df["intelligence_category"].dropna().unique().tolist()
+)
 
-    if category_filter != "All":
-        filtered_df = filtered_df[filtered_df["intelligence_category"].astype(str) == category_filter]
+category_filter = st.sidebar.selectbox(
+    "Intelligence Category",
+    category_options
+)
 
-    if capture_filter != "All":
-        filtered_df = filtered_df[filtered_df["capture_stage"].astype(str) == capture_filter]
+capture_options = ["All"] + sorted(
+    projects_df["capture_stage"].dropna().unique().tolist()
+)
 
-    if corridor_filter != "All":
-        filtered_df = filtered_df[filtered_df["corridor_region"].astype(str) == corridor_filter]
+capture_filter = st.sidebar.selectbox(
+    "Capture Stage",
+    capture_options
+)
 
-    if stage_filter != "All":
-        filtered_df = filtered_df[filtered_df["project_stage"].astype(str) == stage_filter]
+corridor_options = ["All"] + sorted(
+    projects_df["corridor_region"].dropna().unique().tolist()
+)
 
-    if predictive_only:
-        filtered_df = filtered_df[filtered_df["predictive_signal"] == True]
+corridor_filter = st.sidebar.selectbox(
+    "Corridor Region",
+    corridor_options
+)
 
-    if prime_only:
-        filtered_df = filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]
+project_stage_options = ["All"] + sorted(
+    projects_df["project_stage"].dropna().unique().tolist()
+)
 
-    if search_term:
-        mask = filtered_df.astype(str).apply(
-            lambda row: row.str.contains(search_term, case=False, na=False).any(),
-            axis=1,
-        )
-        filtered_df = filtered_df[mask]
+project_stage_filter = st.sidebar.selectbox(
+    "Project Stage",
+    project_stage_options
+)
 
+# =========================================================
+# FILTER LOGIC
+# =========================================================
+
+filtered_df = projects_df.copy()
+
+if search_keyword:
+    filtered_df = filtered_df[
+        filtered_df["canonical_project_name"]
+        .astype(str)
+        .str.contains(search_keyword, case=False, na=False)
+    ]
+
+if predictive_only:
+    filtered_df = filtered_df[
+        filtered_df["predictive_signal"] == True
+    ]
+
+if prime_only:
+    filtered_df = filtered_df[
+        filtered_df["capture_stage"] == "Prime Positioning"
+    ]
+
+if county_filter != "All":
+    filtered_df = filtered_df[
+        filtered_df["county"] == county_filter
+    ]
+
+if category_filter != "All":
+    filtered_df = filtered_df[
+        filtered_df["intelligence_category"] == category_filter
+    ]
+
+if capture_filter != "All":
+    filtered_df = filtered_df[
+        filtered_df["capture_stage"] == capture_filter
+    ]
+
+if corridor_filter != "All":
+    filtered_df = filtered_df[
+        filtered_df["corridor_region"] == corridor_filter
+    ]
+
+if project_stage_filter != "All":
+    filtered_df = filtered_df[
+        filtered_df["project_stage"] == project_stage_filter
+    ]
+
+# =========================================================
+# HEADER
+# =========================================================
 
 st.title("Infrastructure Intelligence Platform")
-st.markdown("Allen Hammett AI — Executive Infrastructure / Early Capture Intelligence")
 
-st.markdown("### Capture Intelligence Legend")
+st.markdown(
+    "Allen Hammett AI — Executive Infrastructure / Early Capture Intelligence"
+)
+
+# =========================================================
+# LEGEND
+# =========================================================
+
+st.header("Capture Intelligence Legend")
 
 legend_cols = st.columns(5)
-legend_cols[0].success("Prime Positioning 90–100")
-legend_cols[1].info("Strategic Development 75–89")
-legend_cols[2].markdown("**Active Monitoring**  \n50–74")
-legend_cols[3].markdown("**Early Identification**  \n25–49")
-legend_cols[4].markdown("**Historical Context**  \n0–24")
 
-mapped_df = filtered_df.copy()
+with legend_cols[0]:
+    st.success("Prime Positioning 90–100")
 
-if not mapped_df.empty:
-    mapped_df["latitude"] = pd.to_numeric(mapped_df["latitude"], errors="coerce")
-    mapped_df["longitude"] = pd.to_numeric(mapped_df["longitude"], errors="coerce")
-    mapped_df = mapped_df.dropna(subset=["latitude", "longitude"])
+with legend_cols[1]:
+    st.info("Strategic Development 75–89")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+with legend_cols[2]:
+    st.warning("Active Monitoring 50–74")
 
-col1.metric("Qualified Signals", len(filtered_df))
-col2.metric(
-    "Prime Positioning",
-    len(filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]) if not filtered_df.empty else 0,
-)
-col3.metric(
-    "Predictive Signals",
-    len(filtered_df[filtered_df["predictive_signal"] == True]) if not filtered_df.empty else 0,
-)
-col4.metric("Mapped Records", len(mapped_df))
-col5.metric("Leads", len(leads_df))
+with legend_cols[3]:
+    st.warning("Early Identification 25–49")
 
-st.markdown("## Infrastructure Intelligence Map")
+with legend_cols[4]:
+    st.error("Historical Context 0–24")
 
-if not mapped_df.empty:
-    map_df = mapped_df.rename(columns={"latitude": "lat", "longitude": "lon"}).copy()
+# =========================================================
+# KPI ROW
+# =========================================================
 
-    center_lat = float(map_df["lat"].median())
-    center_lon = float(map_df["lon"].median())
+kpi_cols = st.columns(5)
+
+with kpi_cols[0]:
+    st.metric("Qualified Signals", len(projects_df))
+
+with kpi_cols[1]:
+    st.metric(
+        "Prime Positioning",
+        len(
+            filtered_df[
+                filtered_df["capture_stage"] == "Prime Positioning"
+            ]
+        )
+    )
+
+with kpi_cols[2]:
+    st.metric(
+        "Predictive Signals",
+        len(
+            filtered_df[
+                filtered_df["predictive_signal"] == True
+            ]
+        )
+    )
+
+with kpi_cols[3]:
+    st.metric(
+        "Mapped Records",
+        len(
+            filtered_df[
+                filtered_df["latitude"].notna()
+            ]
+        )
+    )
+
+with kpi_cols[4]:
+    st.metric("Leads", len(leads_df))
+
+# =========================================================
+# MAP
+# =========================================================
+
+st.header("Infrastructure Intelligence Map")
+
+map_df = filtered_df[
+    filtered_df["latitude"].notna()
+].copy()
+
+if not map_df.empty:
+
+    map_df["color"] = map_df["capture_stage"].map({
+        "Prime Positioning": [0, 200, 83],
+        "Strategic Development": [0, 102, 255],
+        "Active Monitoring": [255, 193, 7],
+        "Early Identification": [255, 87, 34],
+        "Historical Context": [158, 158, 158]
+    })
+
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_df,
+        get_position='[longitude, latitude]',
+        get_radius=1200,
+        get_fill_color="color",
+        pickable=True,
+        auto_highlight=True
+    )
+
+    view_state = pdk.ViewState(
+        latitude=39.0438,
+        longitude=-77.4874,
+        zoom=8,
+        pitch=40
+    )
+
+    tooltip = {
+        "html": """
+        <b>Project:</b> {canonical_project_name}<br/>
+        <b>Capture Stage:</b> {capture_stage}<br/>
+        <b>Score:</b> {early_capture_score}<br/>
+        <b>Category:</b> {intelligence_category}<br/>
+        <b>Corridor:</b> {corridor_region}<br/>
+        <b>County:</b> {county}<br/>
+        <b>Stage:</b> {project_stage}
+        """,
+        "style": {
+            "backgroundColor": "black",
+            "color": "white"
+        }
+    }
 
     st.pydeck_chart(
         pdk.Deck(
-            map_style=pdk.map_styles.CARTO_DARK,
-            initial_view_state=pdk.ViewState(
-                latitude=center_lat,
-                longitude=center_lon,
-                zoom=9,
-                pitch=35,
-            ),
-            layers=[
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    data=map_df,
-                    get_position="[lon, lat]",
-                    get_color="map_color",
-                    get_radius="map_radius",
-                    pickable=True,
-                    auto_highlight=True,
-                )
-            ],
-            tooltip={
-                "html": """
-                <b>Project:</b> {canonical_project_name}<br/>
-                <b>Capture Stage:</b> {capture_stage}<br/>
-                <b>Score:</b> {early_capture_score}<br/>
-                <b>Category:</b> {intelligence_category}<br/>
-                <b>County:</b> {county}<br/>
-                <b>Stage:</b> {project_stage}
-                """,
-                "style": {"backgroundColor": "black", "color": "white"},
-            },
+            layers=[layer],
+            initial_view_state=view_state,
+            tooltip=tooltip,
+            map_style="mapbox://styles/mapbox/dark-v10"
         )
     )
+
 else:
-    st.warning("No mapped records found.")
+    st.warning("No geospatial infrastructure records found.")
 
-st.markdown("## Executive Intelligence Profiles")
+# =========================================================
+# EXECUTIVE INTELLIGENCE PROFILES
+# =========================================================
 
-if not filtered_df.empty:
-    for _, row in filtered_df.head(50).iterrows():
-        project_title = row.get("canonical_project_name") or row.get("project_name") or "Unnamed Project"
-        stage = row.get("capture_stage") or "Unclassified"
+st.header("Executive Intelligence Profiles")
 
-        with st.expander(f"{project_title} ({stage})"):
-            c1, c2 = st.columns(2)
+for _, row in filtered_df.head(100).iterrows():
 
-            with c1:
-                st.markdown(f"**Case Number:** {row.get('case_number')}")
-                st.markdown(f"**County:** {row.get('county')}")
-                st.markdown(f"**Project Stage:** {row.get('project_stage')}")
-                st.markdown(f"**Infrastructure Type:** {row.get('infrastructure_type')}")
-                st.markdown(f"**Intelligence Category:** {row.get('intelligence_category')}")
-                st.markdown(f"**Capture Score:** {row.get('early_capture_score')}")
-                st.markdown(f"**Applicant:** {row.get('applicant_name')}")
-                st.markdown(f"**Utility Provider:** {row.get('utility_provider')}")
+    capture_stage = row.get("capture_stage", "Unknown")
 
-            with c2:
-                st.markdown(f"**Corridor Region:** {row.get('corridor_region')}")
-                st.markdown(f"**Market Cluster:** {row.get('market_cluster')}")
-                st.markdown(f"**Filing Date:** {row.get('filing_date')}")
-                st.markdown(f"**Source Name:** {row.get('source_name')}")
-                st.markdown(f"**Source Type:** {row.get('source_type')}")
-                st.markdown(f"**Predictive Signal:** {row.get('predictive_signal')}")
-                st.markdown(f"**Created At:** {row.get('created_at')}")
+    with st.expander(
+        f"{row['canonical_project_name']} ({capture_stage})"
+    ):
 
-            st.markdown("### Permit Description")
-            st.write(row.get("permit_description") or "No permit description stored yet.")
+        col1, col2 = st.columns(2)
 
-            st.markdown("### Raw Filing Intelligence")
-            st.code(str(row.get("raw_text") or "No raw filing text stored yet."))
+        with col1:
 
-            if row.get("source_url"):
-                st.markdown(f"[Open Source Record]({row.get('source_url')})")
+            st.markdown(f"**Case Number:** {row.get('case_number', 'N/A')}")
+            st.markdown(f"**County:** {row.get('county', 'N/A')}")
+            st.markdown(f"**Project Stage:** {row.get('project_stage', 'N/A')}")
+            st.markdown(f"**Infrastructure Type:** {row.get('infrastructure_type', 'N/A')}")
+            st.markdown(f"**Intelligence Category:** {row.get('intelligence_category', 'N/A')}")
+            st.markdown(f"**Capture Score:** {row.get('early_capture_score', 'N/A')}")
 
-            if row.get("source_document_url"):
-                st.markdown(f"[Open Filing Document]({row.get('source_document_url')})")
+            st.markdown(f"**Applicant:** {row.get('applicant', 'Unknown')}")
+            st.markdown(f"**Utility Provider:** {row.get('utility_dependency', 'Unknown')}")
 
+        with col2:
 
-st.markdown("## Executive Priority Intelligence")
+            st.markdown(f"**Corridor Region:** {row.get('corridor_region', 'N/A')}")
+            st.markdown(f"**Market Cluster:** {row.get('market_cluster', 'N/A')}")
+            st.markdown(f"**Filing Date:** {row.get('filing_date', 'N/A')}")
+            st.markdown(f"**Source Name:** {row.get('source_name', 'N/A')}")
+            st.markdown(f"**Source Type:** {row.get('source_type', 'N/A')}")
+            st.markdown(f"**Predictive Signal:** {row.get('predictive_signal', False)}")
+            st.markdown(f"**Estimated MW Demand:** {row.get('estimated_power_mw', 'Unknown')}")
+            st.markdown(f"**Created At:** {row.get('created_at', 'N/A')}")
 
-display_cols = [
+        st.markdown("---")
+
+        st.subheader("Executive Strategic Assessment")
+
+        strategic_notes = row.get("strategic_notes")
+
+        if strategic_notes:
+            st.info(strategic_notes)
+        else:
+            st.warning("No strategic assessment generated yet.")
+
+        st.subheader("Infrastructure Risk Flags")
+
+        risk_flags = row.get("risk_flags")
+
+        if risk_flags:
+            for flag in str(risk_flags).split(","):
+                st.error(flag.strip())
+        else:
+            st.success("No major infrastructure risks currently detected.")
+
+        st.subheader("Permit Description")
+
+        permit_description = row.get("permit_description")
+
+        if permit_description:
+            st.write(permit_description)
+        else:
+            st.warning("No permit description stored yet.")
+
+        st.subheader("Raw Filing Intelligence")
+
+        raw_text = row.get("raw_text")
+
+        if raw_text:
+            st.code(raw_text[:5000])
+        else:
+            st.warning("No raw filing text stored yet.")
+
+# =========================================================
+# EXECUTIVE PRIORITY TABLE
+# =========================================================
+
+st.header("Executive Priority Intelligence")
+
+priority_columns = [
     "capture_stage",
     "early_capture_score",
     "intelligence_category",
@@ -427,47 +440,59 @@ display_cols = [
     "canonical_project_name",
     "project_stage",
     "project_type",
-    "county",
-    "state",
-    "source_name",
-    "predictive_signal",
-    "utility_related",
-    "hyperscale_related",
-    "transmission_related",
-    "fiber_related",
-    "latitude",
-    "longitude",
-    "created_at",
+    "county"
 ]
 
-existing_cols = [c for c in display_cols if c in filtered_df.columns]
-st.dataframe(filtered_df[existing_cols], use_container_width=True)
+available_priority_columns = [
+    c for c in priority_columns if c in filtered_df.columns
+]
 
-st.markdown("## Infrastructure Leads")
-st.dataframe(leads_df, use_container_width=True)
+st.dataframe(
+    filtered_df[available_priority_columns],
+    use_container_width=True
+)
 
-st.markdown("## Export Intelligence")
+# =========================================================
+# LEADS
+# =========================================================
 
-if not filtered_df.empty:
-    opportunities_csv = filtered_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Download Opportunities CSV",
-        data=opportunities_csv,
-        file_name="executive_infrastructure_opportunities.csv",
-        mime="text/csv",
-    )
+st.header("Infrastructure Leads")
 
-if not leads_df.empty:
-    leads_csv = leads_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Download Leads CSV",
-        data=leads_csv,
-        file_name="infrastructure_leads.csv",
-        mime="text/csv",
-    )
+st.dataframe(
+    leads_df,
+    use_container_width=True
+)
+
+# =========================================================
+# EXPORTS
+# =========================================================
+
+st.header("Export Intelligence")
+
+csv_projects = filtered_df.to_csv(index=False)
+
+st.download_button(
+    "Download Opportunities CSV",
+    csv_projects,
+    "infrastructure_opportunities.csv",
+    "text/csv"
+)
+
+csv_leads = leads_df.to_csv(index=False)
+
+st.download_button(
+    "Download Leads CSV",
+    csv_leads,
+    "infrastructure_leads.csv",
+    "text/csv"
+)
+
+# =========================================================
+# SIGN OUT
+# =========================================================
 
 if st.button("Sign Out"):
-    st.session_state.user = None
+    st.session_state.authenticated = False
     st.rerun()
 
 st.caption("Allen Hammett AI • Infrastructure Intelligence System")
