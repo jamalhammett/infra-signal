@@ -81,6 +81,67 @@ def map_color(stage):
     return colors.get(stage, [100, 100, 100])
 
 
+def influence_score(title):
+    title = str(title or "").lower()
+    score = 0
+
+    if "chief" in title or "ceo" in title or "president" in title:
+        score += 40
+    if "vice president" in title or "vp" in title:
+        score += 30
+    if "director" in title:
+        score += 25
+    if "manager" in title:
+        score += 15
+    if "operations" in title:
+        score += 20
+    if "construction" in title:
+        score += 20
+    if "engineering" in title:
+        score += 20
+    if "public sector" in title:
+        score += 25
+    if "sales" in title or "business development" in title:
+        score += 15
+
+    return score
+
+
+def recommended_actions(row, relationships_count):
+    actions = []
+
+    score = float(row.get("early_capture_score") or 0)
+    infrastructure_type = str(row.get("infrastructure_type") or "").lower()
+    utility_dependency = clean_value(row.get("utility_dependency"), "")
+    project_stage = str(row.get("project_stage") or "").lower()
+    estimated_mw = clean_value(row.get("estimated_power_mw"), "")
+
+    if score >= 90:
+        actions.append("Escalate to immediate BD positioning review.")
+    elif score >= 75:
+        actions.append("Track as strategic development opportunity.")
+
+    if "data center" in infrastructure_type:
+        actions.append("Assess hyperscale ecosystem: utility, fiber, security, compliance, and construction stakeholders.")
+
+    if utility_dependency != "":
+        actions.append(f"Map utility relationship path connected to {utility_dependency}.")
+
+    if estimated_mw not in ["", "N/A", "Unknown"]:
+        actions.append("Evaluate power availability, transmission risk, and substation proximity.")
+
+    if relationships_count > 0:
+        actions.append("Prioritize outreach to matched executive contacts.")
+
+    if "review" in project_stage or "submitted" in project_stage:
+        actions.append("Monitor permit approval timeline and county planning updates.")
+
+    if not actions:
+        actions.append("Maintain monitoring status until stronger infrastructure signals appear.")
+
+    return actions
+
+
 def authenticate(email, password):
     df = run_query(
         """
@@ -179,19 +240,28 @@ def load_projects():
     df["capture_stage"] = df["early_capture_score"].apply(capture_stage)
     df["map_color"] = df["capture_stage"].apply(map_color)
 
+    if "estimated_power_mw" in df.columns:
+        df["estimated_power_mw"] = pd.to_numeric(df["estimated_power_mw"], errors="coerce")
+
     return df
 
 
 @st.cache_data(ttl=300)
 def load_relationships():
     try:
-        return run_query(
+        df = run_query(
             """
             select *
             from executive_project_matches
             order by early_capture_score desc nulls last
             """
         )
+
+        if not df.empty and "title" in df.columns:
+            df["influence_score"] = df["title"].apply(influence_score)
+
+        return df
+
     except Exception:
         return pd.DataFrame()
 
@@ -218,6 +288,13 @@ prime_only = st.sidebar.checkbox("Prime Positioning Only")
 predictive_only = st.sidebar.checkbox("Predictive Signals Only")
 watchlist_only = st.sidebar.checkbox("Watchlist Only")
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("Alert Engine")
+
+alert_score_threshold = st.sidebar.slider("Alert Score Threshold", 50, 130, 90)
+alert_mw_threshold = st.sidebar.slider("MW Alert Threshold", 50, 500, 250)
+alert_company_keyword = st.sidebar.text_input("Company / Utility Alert Keyword")
+
 filtered_df = projects_df.copy()
 
 if not filtered_df.empty:
@@ -242,7 +319,7 @@ if not filtered_df.empty:
 
 
 st.title("Infrastructure Intelligence Operating System")
-st.markdown("Allen Hammett AI — Institutional Infrastructure Intelligence + Relationship Intelligence")
+st.markdown("Allen Hammett AI — Infrastructure Intelligence + Relationship Capture + Alert Operations")
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 
@@ -261,6 +338,38 @@ k6.metric(
     "Mapped",
     len(filtered_df.dropna(subset=["latitude", "longitude"])) if not filtered_df.empty and {"latitude", "longitude"}.issubset(filtered_df.columns) else 0,
 )
+
+
+st.markdown("## Executive Alert Feed")
+
+alerts = []
+
+if not filtered_df.empty:
+    high_score_df = filtered_df[filtered_df["early_capture_score"] >= alert_score_threshold]
+    for _, row in high_score_df.head(10).iterrows():
+        alerts.append(f"High-priority signal: {clean_value(row.get('canonical_project_name'))} scored {clean_value(row.get('early_capture_score'))}")
+
+    if "estimated_power_mw" in filtered_df.columns:
+        mw_df = filtered_df[pd.to_numeric(filtered_df["estimated_power_mw"], errors="coerce") >= alert_mw_threshold]
+        for _, row in mw_df.head(10).iterrows():
+            alerts.append(f"Power demand alert: {clean_value(row.get('canonical_project_name'))} estimated at {clean_value(row.get('estimated_power_mw'))} MW")
+
+    if alert_company_keyword:
+        keyword_df = filtered_df[
+            filtered_df.astype(str).apply(
+                lambda row: row.str.contains(alert_company_keyword, case=False, na=False).any(),
+                axis=1,
+            )
+        ]
+        for _, row in keyword_df.head(10).iterrows():
+            alerts.append(f"Keyword alert '{alert_company_keyword}': {clean_value(row.get('canonical_project_name'))}")
+
+if alerts:
+    for alert in alerts[:10]:
+        st.warning(alert)
+else:
+    st.info("No active executive alerts under current thresholds.")
+
 
 st.markdown("## Infrastructure Intelligence Map")
 
@@ -302,8 +411,6 @@ if not filtered_df.empty and {"latitude", "longitude"}.issubset(filtered_df.colu
                 },
             )
         )
-    else:
-        st.warning("No mapped records found for current filters.")
 
 
 left_panel, right_panel = st.columns([1.2, 2.8])
@@ -401,13 +508,16 @@ with right_panel:
         else:
             row = selected_df.iloc[0]
 
-            st.markdown(f"# {selected_project}")
-
             project_relationships = pd.DataFrame()
             if not relationships_df.empty and "canonical_project_name" in relationships_df.columns:
                 project_relationships = relationships_df[
                     relationships_df["canonical_project_name"].astype(str) == str(selected_project)
-                ]
+                ].copy()
+
+                if not project_relationships.empty and "influence_score" in project_relationships.columns:
+                    project_relationships = project_relationships.sort_values("influence_score", ascending=False)
+
+            st.markdown(f"# {selected_project}")
 
             s1, s2, s3, s4, s5 = st.columns(5)
 
@@ -416,6 +526,12 @@ with right_panel:
             s3.metric("MW Demand", clean_value(row.get("estimated_power_mw")))
             s4.metric("Relationships", len(project_relationships))
             s5.metric("Predictive", clean_bool(row.get("predictive_signal")))
+
+            st.markdown("## AI Recommended Actions")
+
+            actions = recommended_actions(row, len(project_relationships))
+            for action in actions:
+                st.success(action)
 
             st.markdown("## Live Intelligence Feed")
 
@@ -491,6 +607,7 @@ with right_panel:
                         "company",
                         "email",
                         "linkedin_url",
+                        "influence_score",
                     ]
 
                     existing_cols = [
@@ -545,6 +662,7 @@ relationship_columns = [
     "title",
     "email",
     "linkedin_url",
+    "influence_score",
 ]
 
 existing_relationship_cols = [
@@ -560,6 +678,7 @@ else:
         use_container_width=True,
         height=500,
     )
+
 
 st.markdown("## Export Intelligence")
 
@@ -585,4 +704,4 @@ if st.button("Sign Out", key="sign_out_button"):
     st.session_state.user = None
     st.rerun()
 
-st.caption("Allen Hammett AI • Institutional Infrastructure Intelligence Operating System")
+st.caption("Allen Hammett AI • Phase 3 Infrastructure Intelligence Operating System")
