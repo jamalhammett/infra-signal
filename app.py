@@ -1,10 +1,10 @@
 import os
-import json
 import pandas as pd
 import streamlit as st
 import psycopg2
 import pydeck as pdk
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -29,6 +29,7 @@ PASSWORD_RESET_KEY = st.secrets.get(
 # =====================================================
 
 def run_query(sql, params=None):
+
     conn = psycopg2.connect(DATABASE_URL)
 
     try:
@@ -39,6 +40,7 @@ def run_query(sql, params=None):
 
 
 def run_execute(sql, params=None):
+
     conn = psycopg2.connect(DATABASE_URL)
 
     try:
@@ -49,7 +51,6 @@ def run_execute(sql, params=None):
 
     finally:
         conn.close()
-
 
 # =====================================================
 # HELPERS
@@ -164,7 +165,7 @@ def login_gate():
         return
 
     st.title("Allen Hammett AI")
-    st.subheader("Executive Infrastructure Intelligence Access")
+    st.subheader("Institutional Infrastructure Intelligence Access")
 
     with st.form("login_form"):
 
@@ -208,7 +209,7 @@ def login_gate():
 
 
 # =====================================================
-# LOAD DATA
+# DATA LOADERS
 # =====================================================
 
 @st.cache_data(ttl=300)
@@ -265,7 +266,24 @@ relationships_df = load_relationships()
 login_gate()
 
 # =====================================================
-# GLOBAL SEARCH
+# SESSION STATE
+# =====================================================
+
+if "watchlist" not in st.session_state:
+    st.session_state.watchlist = []
+
+if "selected_project" not in st.session_state:
+
+    if not projects_df.empty:
+        st.session_state.selected_project = projects_df.iloc[0][
+            "canonical_project_name"
+        ]
+
+    else:
+        st.session_state.selected_project = None
+
+# =====================================================
+# SIDEBAR
 # =====================================================
 
 st.sidebar.header("Executive Command Filters")
@@ -313,22 +331,23 @@ if predictive_only and "predictive_signal" in filtered_df.columns:
         filtered_df["predictive_signal"] == True
     ]
 
-# =====================================================
-# WATCHLIST STATE
-# =====================================================
+if watchlist_only and len(st.session_state.watchlist) > 0:
 
-if "watchlist" not in st.session_state:
-    st.session_state.watchlist = []
+    filtered_df = filtered_df[
+        filtered_df["canonical_project_name"].isin(
+            st.session_state.watchlist
+        )
+    ]
 
 # =====================================================
 # HEADER
 # =====================================================
 
-st.title("Infrastructure Intelligence Command Center")
+st.title("Infrastructure Intelligence Operating System")
 
 st.markdown(
     """
-    Allen Hammett AI — Institutional Infrastructure Intelligence Operating System
+    Allen Hammett AI — Institutional Infrastructure Intelligence + Relationship Intelligence
     """
 )
 
@@ -336,15 +355,15 @@ st.markdown(
 # KPI ROW
 # =====================================================
 
-c1, c2, c3, c4, c5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 
-c1.metric(
-    "Qualified Signals",
+k1.metric(
+    "Signals",
     len(filtered_df),
 )
 
-c2.metric(
-    "Prime Positioning",
+k2.metric(
+    "Prime",
     len(
         filtered_df[
             filtered_df["capture_stage"] == "Prime Positioning"
@@ -352,8 +371,8 @@ c2.metric(
     ),
 )
 
-c3.metric(
-    "Predictive Signals",
+k3.metric(
+    "Predictive",
     len(
         filtered_df[
             filtered_df["predictive_signal"] == True
@@ -361,18 +380,23 @@ c3.metric(
     ) if "predictive_signal" in filtered_df.columns else 0,
 )
 
-c4.metric(
-    "Mapped Projects",
+k4.metric(
+    "Relationships",
+    len(relationships_df),
+)
+
+k5.metric(
+    "Watchlist",
+    len(st.session_state.watchlist),
+)
+
+k6.metric(
+    "Mapped",
     len(
         filtered_df.dropna(
             subset=["latitude", "longitude"]
         )
     ) if "latitude" in filtered_df.columns else 0,
-)
-
-c5.metric(
-    "Executive Relationships",
-    len(relationships_df),
 )
 
 # =====================================================
@@ -413,7 +437,6 @@ if "latitude" in filtered_df.columns:
                     <b>Project:</b> {canonical_project_name}<br/>
                     <b>Capture Stage:</b> {capture_stage}<br/>
                     <b>Score:</b> {early_capture_score}<br/>
-                    <b>Category:</b> {intelligence_category}<br/>
                     <b>County:</b> {county}
                     """,
                     "style": {
@@ -425,47 +448,83 @@ if "latitude" in filtered_df.columns:
         )
 
 # =====================================================
-# MASTER DETAIL LAYOUT
+# MAIN LAYOUT
 # =====================================================
 
-left_col, right_col = st.columns([1.1, 2.2])
+left_panel, right_panel = st.columns([1.2, 2.8])
 
 # =====================================================
 # LEFT PANEL
 # =====================================================
 
-with left_col:
+with left_panel:
 
-    st.markdown("## Priority Projects")
+    st.markdown("## Priority Infrastructure Queue")
 
-    project_display_df = filtered_df[
-        [
-            "canonical_project_name",
-            "capture_stage",
-            "early_capture_score",
-        ]
-    ].copy()
-
-    project_display_df = project_display_df.fillna("N/A")
-
-    project_options = project_display_df[
-        "canonical_project_name"
-    ].tolist()
-
-    selected_project = st.radio(
-        "Select Project",
-        project_options,
-        label_visibility="collapsed",
+    quick_search = st.text_input(
+        "Quick Project Filter"
     )
+
+    queue_df = filtered_df.copy()
+
+    if quick_search:
+
+        queue_df = queue_df[
+            queue_df["canonical_project_name"].astype(str).str.contains(
+                quick_search,
+                case=False,
+                na=False,
+            )
+        ]
+
+    queue_df = queue_df.sort_values(
+        by="early_capture_score",
+        ascending=False,
+    )
+
+    queue_limit = st.slider(
+        "Visible Queue Size",
+        10,
+        200,
+        40,
+    )
+
+    queue_df = queue_df.head(queue_limit)
+
+    for _, project in queue_df.iterrows():
+
+        project_name = clean_value(
+            project.get("canonical_project_name")
+        )
+
+        score = clean_value(
+            project.get("early_capture_score")
+        )
+
+        stage = clean_value(
+            project.get("capture_stage")
+        )
+
+        if st.button(
+            f"{project_name} | {score}",
+            use_container_width=True,
+        ):
+
+            st.session_state.selected_project = project_name
 
     st.markdown("---")
 
     st.markdown("## Watchlist")
 
-    if st.button("⭐ Add Selected Project"):
+    if st.button(
+        "⭐ Add Current Project",
+        use_container_width=True,
+    ):
 
-        if selected_project not in st.session_state.watchlist:
-            st.session_state.watchlist.append(selected_project)
+        current_project = st.session_state.selected_project
+
+        if current_project not in st.session_state.watchlist:
+            st.session_state.watchlist.append(current_project)
 
     if len(st.session_state.watchlist) == 0:
 
@@ -474,13 +533,36 @@ with left_col:
     else:
 
         for watch_item in st.session_state.watchlist:
-            st.success(watch_item)
+
+            watch_col1, watch_col2 = st.columns([5,1])
+
+            with watch_col1:
+
+                if st.button(
+                    watch_item,
+                    key=f"watch_{watch_item}",
+                    use_container_width=True,
+                ):
+
+                    st.session_state.selected_project = watch_item
+
+            with watch_col2:
+
+                if st.button(
+                    "❌",
+                    key=f"remove_{watch_item}",
+                ):
+
+                    st.session_state.watchlist.remove(watch_item)
+                    st.rerun()
 
 # =====================================================
 # RIGHT PANEL
 # =====================================================
 
-with right_col:
+with right_panel:
+
+    selected_project = st.session_state.selected_project
 
     selected_df = filtered_df[
         filtered_df["canonical_project_name"] == selected_project
@@ -490,22 +572,80 @@ with right_col:
 
         row = selected_df.iloc[0]
 
+        # =============================================
+        # EXECUTIVE SNAPSHOT HEADER
+        # =============================================
+
         st.markdown(f"# {selected_project}")
 
-        stage_color = {
-            "Prime Positioning": "🟢",
-            "Strategic Development": "🔵",
-            "Active Monitoring": "🟡",
-            "Early Identification": "⚪",
-            "Historical Context": "⚫",
-        }
+        s1, s2, s3, s4, s5 = st.columns(5)
 
-        st.markdown(
-            f"""
-            {stage_color.get(row['capture_stage'], '⚪')}
-            {row['capture_stage']}
-            """
+        s1.metric(
+            "Capture Score",
+            clean_value(row.get("early_capture_score"))
         )
+
+        s2.metric(
+            "Stage",
+            clean_value(row.get("capture_stage"))
+        )
+
+        s3.metric(
+            "MW Demand",
+            clean_value(row.get("estimated_power_mw"))
+        )
+
+        s4.metric(
+            "Relationships",
+            len(
+                relationships_df[
+                    relationships_df["canonical_project_name"]
+                    == selected_project
+                ]
+            )
+        )
+
+        s5.metric(
+            "Predictive",
+            clean_bool(
+                row.get("predictive_signal")
+            )
+        )
+
+        # =============================================
+        # LIVE SIGNAL FEED
+        # =============================================
+
+        st.markdown("## Live Intelligence Feed")
+
+        feed_items = []
+
+        if clean_bool(row.get("predictive_signal")) == "Yes":
+            feed_items.append(
+                "Predictive infrastructure signal identified"
+            )
+
+        if clean_value(row.get("estimated_power_mw")) != "N/A":
+            feed_items.append(
+                f"Estimated MW demand detected: {clean_value(row.get('estimated_power_mw'))}"
+            )
+
+        if clean_value(row.get("utility_dependency")) != "N/A":
+            feed_items.append(
+                f"Utility dependency mapped: {clean_value(row.get('utility_dependency'))}"
+            )
+
+        if clean_value(row.get("risk_flags")) != "N/A":
+            feed_items.append(
+                f"Infrastructure risks identified: {clean_value(row.get('risk_flags'))}"
+            )
+
+        feed_items.append(
+            f"Project currently in {clean_value(row.get('capture_stage'))} stage"
+        )
+
+        for item in feed_items:
+            st.info(item)
 
         # =============================================
         # TABS
@@ -525,13 +665,9 @@ with right_col:
 
         with overview_tab:
 
-            col1, col2 = st.columns(2)
+            c1, c2 = st.columns(2)
 
-            with col1:
-
-                st.markdown(
-                    f"**Capture Score:** {clean_value(row.get('early_capture_score'))}"
-                )
+            with c1:
 
                 st.markdown(
                     f"**Infrastructure Type:** {clean_value(row.get('infrastructure_type'))}"
@@ -542,29 +678,25 @@ with right_col:
                 )
 
                 st.markdown(
-                    f"**Case Number:** {clean_value(row.get('case_number'))}"
-                )
-
-                st.markdown(
                     f"**County:** {clean_value(row.get('county'))}"
-                )
-
-            with col2:
-
-                st.markdown(
-                    f"**Market Cluster:** {clean_value(row.get('market_cluster'))}"
                 )
 
                 st.markdown(
                     f"**Corridor Region:** {clean_value(row.get('corridor_region'))}"
                 )
 
+            with c2:
+
                 st.markdown(
-                    f"**Estimated MW Demand:** {clean_value(row.get('estimated_power_mw'))}"
+                    f"**Market Cluster:** {clean_value(row.get('market_cluster'))}"
                 )
 
                 st.markdown(
-                    f"**Predictive Signal:** {clean_bool(row.get('predictive_signal'))}"
+                    f"**Utility Provider:** {clean_value(row.get('utility_dependency'))}"
+                )
+
+                st.markdown(
+                    f"**Case Number:** {clean_value(row.get('case_number'))}"
                 )
 
                 st.markdown(
@@ -579,12 +711,12 @@ with right_col:
 
             st.markdown("## Executive Strategic Assessment")
 
-            strategic_notes = clean_value(
-                row.get("strategic_notes"),
-                "No strategic assessment generated."
+            st.info(
+                clean_value(
+                    row.get("strategic_notes"),
+                    "No strategic assessment generated yet."
+                )
             )
-
-            st.info(strategic_notes)
 
             st.markdown("## Infrastructure Risk Flags")
 
@@ -594,7 +726,9 @@ with right_col:
             )
 
             if risk_flags == "":
-                st.success("No major risk flags identified.")
+                st.success(
+                    "No critical infrastructure risks detected."
+                )
 
             else:
 
@@ -610,13 +744,14 @@ with right_col:
             st.markdown("## Executive Relationship Intelligence")
 
             project_relationships = relationships_df[
-                relationships_df["canonical_project_name"] == selected_project
+                relationships_df["canonical_project_name"]
+                == selected_project
             ]
 
             if project_relationships.empty:
 
                 st.warning(
-                    "No executive relationships mapped yet."
+                    "No executive relationships identified."
                 )
 
             else:
