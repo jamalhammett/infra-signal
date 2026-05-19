@@ -14,7 +14,10 @@ st.set_page_config(
 )
 
 DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
-PASSWORD_RESET_KEY = st.secrets.get("PASSWORD_RESET_KEY", os.getenv("PASSWORD_RESET_KEY", "AH_RESET_2026"))
+PASSWORD_RESET_KEY = st.secrets.get(
+    "PASSWORD_RESET_KEY",
+    os.getenv("PASSWORD_RESET_KEY", "AH_RESET_2026"),
+)
 
 
 # =====================================================
@@ -180,7 +183,7 @@ def login_gate():
 
 
 # =====================================================
-# INTELLIGENCE SCORING
+# SCORING
 # =====================================================
 
 def capture_stage(score):
@@ -253,45 +256,32 @@ def get_projects(time_horizon):
     return df
 
 
-def get_leads():
-    if not table_exists("leads"):
+def get_relationship_pipeline():
+    if not table_exists("executive_project_matches"):
         return pd.DataFrame()
 
-    cols = get_columns("leads")
-
-    wanted = [
-        "company",
-        "contact_name",
-        "title",
-        "email",
-        "phone",
-        "county",
-        "state",
-        "source_name",
-        "created_at",
-    ]
-
-    selected = [c for c in wanted if c in cols]
-
-    if not selected:
-        return pd.DataFrame()
-
-    order_clause = "order by created_at desc" if "created_at" in cols else ""
-
-    df = run_query(
-        f"""
-        select {", ".join(selected)}
-        from leads
-        {order_clause}
-        limit 500
+    return run_query(
+        """
+        select
+            canonical_project_name,
+            company,
+            full_name,
+            title,
+            email,
+            linkedin_url,
+            infrastructure_type,
+            intelligence_category,
+            county,
+            market_cluster,
+            corridor_region,
+            early_capture_score
+        from executive_project_matches
+        order by early_capture_score desc nulls last,
+                 company,
+                 full_name
+        limit 1000
         """
     )
-
-    for c in wanted:
-        if c not in df.columns:
-            df[c] = None
-
-    return df
 
 
 def get_project_contacts(project_name):
@@ -337,7 +327,7 @@ time_horizon = st.sidebar.selectbox(
 )
 
 projects_df = get_projects(time_horizon)
-leads_df = get_leads()
+relationship_df = get_relationship_pipeline()
 
 filtered_df = projects_df.copy()
 
@@ -416,7 +406,7 @@ m3.metric(
     len(filtered_df[filtered_df["predictive_signal"] == True]) if "predictive_signal" in filtered_df.columns else 0,
 )
 m4.metric("Mapped Records", mapped_count)
-m5.metric("Leads", len(leads_df))
+m5.metric("Executive Relationships", len(relationship_df))
 
 
 # =====================================================
@@ -559,7 +549,49 @@ else:
 
 
 # =====================================================
-# TABLES
+# EXECUTIVE RELATIONSHIP PIPELINE
+# =====================================================
+
+st.markdown("## Executive Relationship Pipeline")
+
+if relationship_df.empty:
+    st.info("No executive relationship intelligence found.")
+
+else:
+    st.success(f"{len(relationship_df)} executive relationships mapped")
+
+    relationship_search = st.text_input("Search executive relationships")
+
+    display_relationship_df = relationship_df.copy()
+
+    if relationship_search:
+        display_relationship_df = display_relationship_df[
+            display_relationship_df.astype(str).apply(
+                lambda row: row.str.contains(
+                    relationship_search,
+                    case=False,
+                    na=False,
+                ).any(),
+                axis=1,
+            )
+        ]
+
+    st.dataframe(
+        display_relationship_df,
+        use_container_width=True,
+        height=500,
+    )
+
+    st.download_button(
+        "Download Executive Relationship Pipeline CSV",
+        display_relationship_df.to_csv(index=False),
+        "executive_relationship_pipeline.csv",
+        "text/csv",
+    )
+
+
+# =====================================================
+# EXECUTIVE PRIORITY TABLE
 # =====================================================
 
 st.markdown("## Executive Priority Intelligence")
@@ -593,9 +625,6 @@ if not filtered_df.empty:
 else:
     st.info("No records to display.")
 
-st.markdown("## Infrastructure Leads")
-st.dataframe(leads_df, use_container_width=True)
-
 
 # =====================================================
 # EXPORTS
@@ -611,11 +640,11 @@ if not filtered_df.empty:
         "text/csv",
     )
 
-if not leads_df.empty:
+if not relationship_df.empty:
     st.download_button(
-        "Download Leads CSV",
-        leads_df.to_csv(index=False),
-        "infrastructure_leads.csv",
+        "Download All Executive Relationships CSV",
+        relationship_df.to_csv(index=False),
+        "all_executive_relationships.csv",
         "text/csv",
     )
 
@@ -628,4 +657,4 @@ if st.button("Sign Out"):
     st.session_state.user = None
     st.rerun()
 
-st.caption("Allen Hammett AI • Infrastructure Intelligence System")
+st.caption("Allen Hammett AI • Infrastructure Intelligence + Relationship Capture System")
