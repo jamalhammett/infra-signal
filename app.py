@@ -500,17 +500,17 @@ st.markdown(
         font-weight: 600;
     }
     .ribbon-card {
-        height: 212px;
+        height: 255px;
         border: 1px solid #1f2a3a;
         border-top: 4px solid var(--accent);
         background: linear-gradient(145deg, #060a0f 0%, #101824 100%);
         border-radius: 12px;
-        padding: 14px 16px;
+        padding: 16px 16px;
         box-shadow: 0 8px 22px rgba(0,0,0,.28);
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        overflow: hidden;
+        overflow: visible;
     }
     .ribbon-status {
         color: var(--accent);
@@ -518,35 +518,39 @@ st.markdown(
         font-weight: 900;
         letter-spacing: .08rem;
         text-transform: uppercase;
-        margin-bottom: 8px;
+        margin-bottom: 9px;
     }
     .ribbon-title {
         color: #f5f7fa;
         font-size: .96rem;
         font-weight: 850;
-        line-height: 1.15rem;
-        height: 38px;
+        line-height: 1.18rem;
+        min-height: 42px;
+        max-height: 44px;
         overflow: hidden;
-        text-overflow: ellipsis;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
     }
     .ribbon-meta {
         color: #aeb8c5;
         font-size: .76rem;
-        line-height: 1.18rem;
+        line-height: 1.22rem;
     }
     .ribbon-action {
         color: #ffffff;
         font-size: .76rem;
         font-weight: 700;
         border-top: 1px solid #243244;
-        padding-top: 8px;
+        padding-top: 10px;
+        margin-top: 12px;
+        min-height: 42px;
+        line-height: 1.15rem;
+    }
+    .ribbon-open {
         margin-top: 10px;
-        min-height: 34px;
+        margin-bottom: 18px;
     }
     .ribbon-open button {
-        margin-top: 8px;
-        height: 32px;
+        height: 34px;
         border-radius: 8px;
         font-size: .78rem;
         font-weight: 700;
