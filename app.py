@@ -297,12 +297,10 @@ def build_ribbon_df(projects_df, relationships_df):
 
     ribbon_df["priority_rank"] = ribbon_df["opportunity_status"].map(priority_order).fillna(9)
 
-    ribbon_df = ribbon_df.sort_values(
+    return ribbon_df.sort_values(
         by=["priority_rank", "early_capture_score", "relationship_count"],
         ascending=[True, False, True],
     )
-
-    return ribbon_df
 
 
 def authenticate(email, password):
@@ -482,7 +480,7 @@ st.markdown(
     """
     <style>
     .block-container {
-        padding-top: 2rem;
+        padding-top: 1.55rem;
         padding-bottom: 2rem;
         max-width: 1500px;
     }
@@ -501,39 +499,57 @@ st.markdown(
         height: 38px;
         font-weight: 600;
     }
-    .op-ribbon {
+    .ribbon-card {
+        height: 212px;
         border: 1px solid #1f2a3a;
-        background: linear-gradient(135deg, #070b10 0%, #101824 100%);
-        padding: 14px 16px;
+        border-top: 4px solid var(--accent);
+        background: linear-gradient(145deg, #060a0f 0%, #101824 100%);
         border-radius: 12px;
-        min-height: 138px;
-        box-shadow: 0 0 18px rgba(0,0,0,.28);
+        padding: 14px 16px;
+        box-shadow: 0 8px 22px rgba(0,0,0,.28);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
     }
-    .op-status {
+    .ribbon-status {
+        color: var(--accent);
         font-size: .72rem;
-        font-weight: 800;
+        font-weight: 900;
         letter-spacing: .08rem;
         text-transform: uppercase;
         margin-bottom: 8px;
     }
-    .op-title {
-        font-size: .9rem;
-        font-weight: 800;
-        line-height: 1.15rem;
+    .ribbon-title {
         color: #f5f7fa;
-        margin-bottom: 10px;
-    }
-    .op-meta {
-        font-size: .75rem;
-        color: #a7b3c2;
+        font-size: .96rem;
+        font-weight: 850;
         line-height: 1.15rem;
+        height: 38px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 8px;
     }
-    .op-action {
-        font-size: .74rem;
+    .ribbon-meta {
+        color: #aeb8c5;
+        font-size: .76rem;
+        line-height: 1.18rem;
+    }
+    .ribbon-action {
         color: #ffffff;
-        margin-top: 8px;
+        font-size: .76rem;
+        font-weight: 700;
         border-top: 1px solid #243244;
-        padding-top: 7px;
+        padding-top: 8px;
+        margin-top: 10px;
+        min-height: 34px;
+    }
+    .ribbon-open button {
+        margin-top: 8px;
+        height: 32px;
+        border-radius: 8px;
+        font-size: .78rem;
+        font-weight: 700;
     }
     </style>
     """,
@@ -557,9 +573,9 @@ else:
         project_name = clean_value(item.get("canonical_project_name"), "Unnamed Opportunity")
         status = clean_value(item.get("opportunity_status"), "MONITOR")
         status_color = clean_value(item.get("status_color"), "#8a8f98")
-        score = clean_value(item.get("early_capture_score"), "0")
+        score = int(safe_number(item.get("early_capture_score"), 0))
         mw = safe_number(item.get("estimated_power_mw"), 0)
-        rel_count = safe_number(item.get("relationship_count"), 0)
+        rel_count = int(safe_number(item.get("relationship_count"), 0))
         stage = clean_value(item.get("capture_stage"), "Unknown")
         market = clean_value(item.get("market_cluster"), "Unknown Market")
 
@@ -575,31 +591,32 @@ else:
             action_text = "Maintain monitoring posture."
 
         with ribbon_cols[idx]:
-            if st.button(
-                f"{status}: {project_name}",
-                key=f"ribbon_select_{idx}_{project_name}",
-                use_container_width=True,
-            ):
-                st.session_state.selected_project = project_name
-                st.rerun()
-
             st.markdown(
                 f"""
-                <div class="op-ribbon">
-                    <div class="op-status" style="color:{status_color};">{status}</div>
-                    <div class="op-title">{project_name}</div>
-                    <div class="op-meta">
-                        Score: <b>{score}</b><br/>
-                        MW: <b>{int(mw) if mw > 0 else "N/A"}</b><br/>
-                        Relationships: <b>{int(rel_count)}</b><br/>
-                        Stage: <b>{stage}</b><br/>
-                        Market: <b>{market}</b>
+                <div class="ribbon-card" style="--accent:{status_color};">
+                    <div>
+                        <div class="ribbon-status">{status}</div>
+                        <div class="ribbon-title">{project_name}</div>
+                        <div class="ribbon-meta">
+                            Score: <b>{score}</b><br/>
+                            MW: <b>{int(mw) if mw > 0 else "N/A"}</b><br/>
+                            Relationships: <b>{rel_count}</b><br/>
+                            Stage: <b>{stage}</b><br/>
+                            Market: <b>{market}</b>
+                        </div>
                     </div>
-                    <div class="op-action">{action_text}</div>
+                    <div class="ribbon-action">{action_text}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+
+            st.markdown('<div class="ribbon-open">', unsafe_allow_html=True)
+            if st.button("Open Opportunity", key=f"ribbon_open_{idx}_{project_name}", use_container_width=True):
+                st.session_state.selected_project = project_name
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
 
 main_tab, operations_tab, deal_tab, relationships_tab, analytics_tab, exports_tab = st.tabs(
     [
