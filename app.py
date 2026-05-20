@@ -101,12 +101,7 @@ def signal_radius(score, mw, relationships):
     mw = safe_number(mw, 0)
     relationships = safe_number(relationships, 0)
 
-    base = 900
-    score_boost = score * 12
-    mw_boost = min(mw, 500) * 3
-    relationship_boost = min(relationships, 25) * 80
-
-    radius = base + score_boost + mw_boost + relationship_boost
+    radius = 900 + (score * 12) + (min(mw, 500) * 3) + (min(relationships, 25) * 80)
 
     if pd.isna(radius) or radius <= 0:
         return 1200
@@ -117,6 +112,7 @@ def signal_radius(score, mw, relationships):
 def influence_score(title):
     title = str(title or "").lower()
     score = 0
+
     if "chief" in title or "ceo" in title or "president" in title:
         score += 40
     if "vice president" in title or "vp" in title:
@@ -135,11 +131,13 @@ def influence_score(title):
         score += 25
     if "sales" in title or "business development" in title:
         score += 15
+
     return score
 
 
 def recommended_actions(row, relationships_count):
     actions = []
+
     score = safe_number(row.get("early_capture_score"), 0)
     infrastructure_type = str(row.get("infrastructure_type") or "").lower()
     utility_dependency = clean_value(row.get("utility_dependency"), "")
@@ -191,6 +189,7 @@ def authenticate(email, password):
 def reset_password(email, reset_key, new_password):
     if reset_key != PASSWORD_RESET_KEY:
         return False, "Invalid reset key."
+
     if len(new_password) < 10:
         return False, "Password must be at least 10 characters."
 
@@ -202,6 +201,7 @@ def reset_password(email, reset_key, new_password):
         """,
         (new_password, email.strip()),
     )
+
     return True, "Password updated successfully."
 
 
@@ -465,7 +465,7 @@ with main_tab:
 
             st.pydeck_chart(
                 pdk.Deck(
-                    map_style="mapbox://styles/mapbox/dark-v10",
+                    map_style=pdk.map_styles.CARTO_DARK,
                     initial_view_state=view_state,
                     layers=[layer],
                     tooltip=tooltip,
