@@ -181,6 +181,22 @@ def deal_readiness(score, relationship_count, mw):
     return min(readiness, 100)
 
 
+def opportunity_status(score, mw, relationship_count):
+    score = safe_number(score, 0)
+    mw = safe_number(mw, 0)
+    relationship_count = safe_number(relationship_count, 0)
+
+    if score >= 90 and relationship_count <= 2:
+        return "CRITICAL", "#ff4b4b"
+    if score >= 90:
+        return "PRIME", "#00ffaa"
+    if mw >= 250 and relationship_count <= 3:
+        return "POWER RISK", "#ffb000"
+    if score >= 75:
+        return "STRATEGIC", "#008cff"
+    return "MONITOR", "#8a8f98"
+
+
 def recommended_actions(row, relationships_count):
     actions = []
     score = safe_number(row.get("early_capture_score"), 0)
@@ -217,6 +233,76 @@ def recommended_actions(row, relationships_count):
         actions.append("Maintain monitoring status until stronger infrastructure signals appear.")
 
     return actions
+
+
+def build_ribbon_df(projects_df, relationships_df):
+    if projects_df.empty:
+        return pd.DataFrame()
+
+    ribbon_df = projects_df.copy()
+
+    if not relationships_df.empty and "canonical_project_name" in relationships_df.columns:
+        rel_counts = (
+            relationships_df.groupby("canonical_project_name")
+            .size()
+            .reset_index(name="relationship_count")
+        )
+        ribbon_df = ribbon_df.merge(rel_counts, on="canonical_project_name", how="left")
+    else:
+        ribbon_df["relationship_count"] = 0
+
+    ribbon_df["relationship_count"] = pd.to_numeric(
+        ribbon_df["relationship_count"],
+        errors="coerce",
+    ).fillna(0).astype(int)
+
+    if "estimated_power_mw" in ribbon_df.columns:
+        ribbon_df["estimated_power_mw"] = pd.to_numeric(
+            ribbon_df["estimated_power_mw"],
+            errors="coerce",
+        ).fillna(0)
+    else:
+        ribbon_df["estimated_power_mw"] = 0
+
+    ribbon_df["early_capture_score"] = pd.to_numeric(
+        ribbon_df["early_capture_score"],
+        errors="coerce",
+    ).fillna(0)
+
+    ribbon_df["opportunity_status"] = ribbon_df.apply(
+        lambda r: opportunity_status(
+            r.get("early_capture_score"),
+            r.get("estimated_power_mw"),
+            r.get("relationship_count"),
+        )[0],
+        axis=1,
+    )
+
+    ribbon_df["status_color"] = ribbon_df.apply(
+        lambda r: opportunity_status(
+            r.get("early_capture_score"),
+            r.get("estimated_power_mw"),
+            r.get("relationship_count"),
+        )[1],
+        axis=1,
+    )
+
+    priority_order = {
+        "CRITICAL": 1,
+        "PRIME": 2,
+        "POWER RISK": 3,
+        "STRATEGIC": 4,
+        "MONITOR": 5,
+    }
+
+    ribbon_df["priority_rank"] = ribbon_df["opportunity_status"].map(priority_order).fillna(9)
+
+    ribbon_df = ribbon_df.sort_values(
+        by=["priority_rank", "early_capture_score", "relationship_count"],
+        ascending=[True, False, True],
+    )
+
+    return ribbon_df
 
 
 def authenticate(email, password):
@@ -415,6 +501,40 @@ st.markdown(
         height: 38px;
         font-weight: 600;
     }
+    .op-ribbon {
+        border: 1px solid #1f2a3a;
+        background: linear-gradient(135deg, #070b10 0%, #101824 100%);
+        padding: 14px 16px;
+        border-radius: 12px;
+        min-height: 138px;
+        box-shadow: 0 0 18px rgba(0,0,0,.28);
+    }
+    .op-status {
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .08rem;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+    }
+    .op-title {
+        font-size: .9rem;
+        font-weight: 800;
+        line-height: 1.15rem;
+        color: #f5f7fa;
+        margin-bottom: 10px;
+    }
+    .op-meta {
+        font-size: .75rem;
+        color: #a7b3c2;
+        line-height: 1.15rem;
+    }
+    .op-action {
+        font-size: .74rem;
+        color: #ffffff;
+        margin-top: 8px;
+        border-top: 1px solid #243244;
+        padding-top: 7px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -422,6 +542,64 @@ st.markdown(
 
 st.title("Infrastructure Intelligence Operating System")
 st.caption("Allen Hammett AI — Executive Infrastructure Intelligence + Relationship Capture + Operational Awareness")
+
+ribbon_df = build_ribbon_df(filtered_df, relationships_df)
+
+st.markdown("### Executive Opportunity Ribbon")
+
+if ribbon_df.empty:
+    st.info("No active opportunity intelligence available under current filters.")
+else:
+    ribbon_cols = st.columns(4)
+    top_ribbon = ribbon_df.head(4).reset_index(drop=True)
+
+    for idx, item in top_ribbon.iterrows():
+        project_name = clean_value(item.get("canonical_project_name"), "Unnamed Opportunity")
+        status = clean_value(item.get("opportunity_status"), "MONITOR")
+        status_color = clean_value(item.get("status_color"), "#8a8f98")
+        score = clean_value(item.get("early_capture_score"), "0")
+        mw = safe_number(item.get("estimated_power_mw"), 0)
+        rel_count = safe_number(item.get("relationship_count"), 0)
+        stage = clean_value(item.get("capture_stage"), "Unknown")
+        market = clean_value(item.get("market_cluster"), "Unknown Market")
+
+        if status == "CRITICAL":
+            action_text = "Expand relationship coverage now."
+        elif status == "PRIME":
+            action_text = "Escalate BD positioning."
+        elif status == "POWER RISK":
+            action_text = "Validate utility and power path."
+        elif status == "STRATEGIC":
+            action_text = "Track capture timing."
+        else:
+            action_text = "Maintain monitoring posture."
+
+        with ribbon_cols[idx]:
+            if st.button(
+                f"{status}: {project_name}",
+                key=f"ribbon_select_{idx}_{project_name}",
+                use_container_width=True,
+            ):
+                st.session_state.selected_project = project_name
+                st.rerun()
+
+            st.markdown(
+                f"""
+                <div class="op-ribbon">
+                    <div class="op-status" style="color:{status_color};">{status}</div>
+                    <div class="op-title">{project_name}</div>
+                    <div class="op-meta">
+                        Score: <b>{score}</b><br/>
+                        MW: <b>{int(mw) if mw > 0 else "N/A"}</b><br/>
+                        Relationships: <b>{int(rel_count)}</b><br/>
+                        Stage: <b>{stage}</b><br/>
+                        Market: <b>{market}</b>
+                    </div>
+                    <div class="op-action">{action_text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 main_tab, operations_tab, deal_tab, relationships_tab, analytics_tab, exports_tab = st.tabs(
     [
