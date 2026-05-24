@@ -177,6 +177,96 @@ def primary_account(row):
     return "Unknown Account"
 
 
+def classify_relationship_role(title, company=""):
+    title_text = normalize_text(title)
+    company_text = normalize_text(company)
+
+    if any(x in company_text for x in ["dominion", "novec", "duke", "apco", "utility", "electric"]):
+        return "Utility"
+
+    if any(x in company_text for x in ["dpr", "turner", "hitt", "clayco", "whiting"]):
+        return "Construction"
+
+    if any(x in company_text for x in ["burns", "jacobs", "hdr", "veatch", "engineering"]):
+        return "Engineering"
+
+    if any(x in title_text for x in ["utility", "power", "transmission", "electric", "large load", "distribution"]):
+        return "Utility"
+
+    if any(x in title_text for x in ["construction", "preconstruction", "project construction", "mission critical", "mep"]):
+        return "Construction"
+
+    if any(x in title_text for x in ["engineer", "engineering", "design", "technical"]):
+        return "Engineering"
+
+    if any(x in title_text for x in ["procurement", "sourcing", "vendor", "supply", "logistics"]):
+        return "Procurement"
+
+    if any(x in title_text for x in ["operations", "facilities", "facility", "data center manager", "critical infrastructure"]):
+        return "Operations"
+
+    if any(x in title_text for x in ["development", "site acquisition", "real estate", "portfolio", "business development"]):
+        return "Owner / Developer"
+
+    if any(x in title_text for x in ["county", "planning", "zoning", "economic development", "public sector", "government"]):
+        return "Government"
+
+    if any(x in title_text for x in ["security", "risk", "compliance"]):
+        return "Security / Compliance"
+
+    return "General Executive"
+
+
+COVERAGE_ROLES = [
+    "Owner / Developer",
+    "Utility",
+    "Construction",
+    "Engineering",
+    "Procurement",
+    "Operations",
+    "Government",
+]
+
+
+def build_coverage_summary(relationships):
+    summary = {role: 0 for role in COVERAGE_ROLES}
+
+    if relationships is None or relationships.empty:
+        return summary, 0, ", ".join(COVERAGE_ROLES), "Critical"
+
+    df = relationships.copy()
+
+    if "relationship_role" not in df.columns:
+        title_col = "title" if "title" in df.columns else None
+        company_col = "company" if "company" in df.columns else "company_name" if "company_name" in df.columns else None
+
+        df["relationship_role"] = df.apply(
+            lambda r: classify_relationship_role(
+                r.get(title_col, "") if title_col else "",
+                r.get(company_col, "") if company_col else "",
+            ),
+            axis=1,
+        )
+
+    for role in COVERAGE_ROLES:
+        summary[role] = int((df["relationship_role"] == role).sum())
+
+    covered_roles = sum(1 for role, count in summary.items() if count > 0)
+    coverage_score = int(round((covered_roles / len(COVERAGE_ROLES)) * 100, 0))
+    missing_roles = [role for role, count in summary.items() if count == 0]
+
+    if coverage_score >= 75:
+        coverage_status = "Strong"
+    elif coverage_score >= 45:
+        coverage_status = "Moderate"
+    elif coverage_score >= 20:
+        coverage_status = "Weak"
+    else:
+        coverage_status = "Critical"
+
+    return summary, coverage_score, ", ".join(missing_roles) if missing_roles else "None", coverage_status
+
+
 def capture_stage(score):
     score = safe_number(score, 0)
     if score >= 90:
@@ -250,10 +340,11 @@ def influence_tier(score):
     return "Monitor"
 
 
-def threat_level(score, mw, relationship_count):
+def threat_level(score, mw, relationship_count, coverage_score=0):
     score = safe_number(score, 0)
     mw = safe_number(mw, 0)
     relationship_count = safe_number(relationship_count, 0)
+    coverage_score = safe_number(coverage_score, 0)
 
     risk = 0
     if score >= 90:
@@ -262,8 +353,12 @@ def threat_level(score, mw, relationship_count):
         risk += 30
     if relationship_count <= 2:
         risk += 25
+    if coverage_score < 35:
+        risk += 20
     if relationship_count >= 8:
         risk -= 10
+    if coverage_score >= 75:
+        risk -= 15
 
     if risk >= 70:
         return "Critical"
@@ -272,19 +367,24 @@ def threat_level(score, mw, relationship_count):
     return "Monitor"
 
 
-def deal_readiness(score, relationship_count, mw):
+def deal_readiness(score, relationship_count, mw, coverage_score=0):
     score = safe_number(score, 0)
     relationship_count = safe_number(relationship_count, 0)
     mw = safe_number(mw, 0)
+    coverage_score = safe_number(coverage_score, 0)
 
     readiness = 0
     if score >= 75:
-        readiness += 35
+        readiness += 30
     if score >= 90:
-        readiness += 20
+        readiness += 15
     if relationship_count >= 3:
-        readiness += 20
+        readiness += 15
     if relationship_count >= 8:
+        readiness += 10
+    if coverage_score >= 45:
+        readiness += 15
+    if coverage_score >= 75:
         readiness += 15
     if mw >= 250:
         readiness += 10
@@ -292,23 +392,24 @@ def deal_readiness(score, relationship_count, mw):
     return min(readiness, 100)
 
 
-def opportunity_status(score, mw, relationship_count):
+def opportunity_status(score, mw, relationship_count, coverage_score=0):
     score = safe_number(score, 0)
     mw = safe_number(mw, 0)
     relationship_count = safe_number(relationship_count, 0)
+    coverage_score = safe_number(coverage_score, 0)
 
-    if score >= 90 and relationship_count <= 2:
+    if score >= 90 and (relationship_count <= 2 or coverage_score < 35):
         return "CRITICAL", "#ff4b4b"
     if score >= 90:
         return "PRIME", "#00ffaa"
-    if mw >= 250 and relationship_count <= 3:
+    if mw >= 250 and (relationship_count <= 3 or coverage_score < 45):
         return "POWER RISK", "#ffb000"
     if score >= 75:
         return "STRATEGIC", "#008cff"
     return "MONITOR", "#8a8f98"
 
 
-def recommended_actions(row, relationships_count):
+def recommended_actions(row, relationships_count, coverage_score=0, missing_roles=""):
     actions = []
     score = safe_number(row.get("early_capture_score"), 0)
     infrastructure_type = str(row.get("infrastructure_type") or "").lower()
@@ -322,6 +423,13 @@ def recommended_actions(row, relationships_count):
         actions.append("Escalate to immediate BD positioning review.")
     elif score >= 75:
         actions.append("Track as strategic development opportunity.")
+
+    if coverage_score < 45:
+        actions.append(f"Coverage gap: fill missing stakeholder lanes — {missing_roles}.")
+    elif coverage_score < 75:
+        actions.append(f"Improve capture readiness by strengthening missing lanes — {missing_roles}.")
+    else:
+        actions.append("Relationship coverage is strong enough for active capture coordination.")
 
     if "data center" in infrastructure_type:
         actions.append("Assess hyperscale ecosystem: utility, fiber, security, compliance, and construction stakeholders.")
@@ -339,9 +447,6 @@ def recommended_actions(row, relationships_count):
 
     if "review" in project_stage or "submitted" in project_stage:
         actions.append("Monitor permit approval timeline and county planning updates.")
-
-    if not actions:
-        actions.append("Maintain monitoring status until stronger infrastructure signals appear.")
 
     return actions
 
@@ -473,6 +578,15 @@ def load_relationships():
         else:
             df["canonical_company"] = ""
 
+        company_col = "company" if "company" in df.columns else "company_name" if "company_name" in df.columns else None
+        df["relationship_role"] = df.apply(
+            lambda r: classify_relationship_role(
+                r.get("title", ""),
+                r.get(company_col, "") if company_col else "",
+            ),
+            axis=1,
+        )
+
         return df
 
     except Exception:
@@ -532,14 +646,24 @@ def add_relationship_counts_for_subset(df, relationships_df):
     working_df = df.copy()
     counts = []
     sources = []
+    coverage_scores = []
+    coverage_statuses = []
+    missing_roles_list = []
 
     for _, row in working_df.iterrows():
-        count, source = relationship_count_fast(row, relationships_df)
-        counts.append(count)
+        rels, source = recover_relationships_for_project(row, relationships_df)
+        coverage_summary, coverage_score, missing_roles, coverage_status = build_coverage_summary(rels)
+        counts.append(len(rels))
         sources.append(source)
+        coverage_scores.append(coverage_score)
+        coverage_statuses.append(coverage_status)
+        missing_roles_list.append(missing_roles)
 
     working_df["relationship_count"] = counts
     working_df["relationship_source"] = sources
+    working_df["coverage_score"] = coverage_scores
+    working_df["coverage_status"] = coverage_statuses
+    working_df["missing_roles"] = missing_roles_list
 
     return working_df
 
@@ -563,6 +687,7 @@ def build_ribbon_df(projects_df, relationships_df):
             r.get("early_capture_score"),
             r.get("estimated_power_mw"),
             r.get("relationship_count"),
+            r.get("coverage_score"),
         )[0],
         axis=1,
     )
@@ -572,6 +697,7 @@ def build_ribbon_df(projects_df, relationships_df):
             r.get("early_capture_score"),
             r.get("estimated_power_mw"),
             r.get("relationship_count"),
+            r.get("coverage_score"),
         )[1],
         axis=1,
     )
@@ -587,24 +713,29 @@ def build_ribbon_df(projects_df, relationships_df):
     ribbon_df["priority_rank"] = ribbon_df["opportunity_status"].map(priority_order).fillna(9)
 
     return ribbon_df.sort_values(
-        by=["priority_rank", "early_capture_score", "relationship_count"],
-        ascending=[True, False, True],
+        by=["priority_rank", "early_capture_score", "coverage_score", "relationship_count"],
+        ascending=[True, False, True, True],
     )
 
 
 def build_gap_report(projects_df, relationships_df):
     if projects_df.empty:
-        return pd.DataFrame(columns=["canonical_project_name", "relationship_count", "relationship_source"])
+        return pd.DataFrame(columns=["canonical_project_name", "relationship_count", "coverage_score", "coverage_status", "missing_roles", "relationship_source"])
 
     rows = []
 
     for _, row in projects_df.iterrows():
         name = clean_value(row.get("canonical_project_name"), "")
-        count, source = relationship_count_fast(row, relationships_df)
+        rels, source = recover_relationships_for_project(row, relationships_df)
+        coverage_summary, coverage_score, missing_roles, coverage_status = build_coverage_summary(rels)
+
         rows.append(
             {
                 "canonical_project_name": name,
-                "relationship_count": count,
+                "relationship_count": len(rels),
+                "coverage_score": coverage_score,
+                "coverage_status": coverage_status,
+                "missing_roles": missing_roles,
                 "relationship_source": source,
             }
         )
@@ -641,24 +772,48 @@ def build_account_profiles(projects_df, relationships_df):
             .reset_index(name="relationship_inventory")
             .rename(columns={"canonical_company": "account_name"})
         )
+
+        role_matrix = (
+            relationships_df.groupby(["canonical_company", "relationship_role"])
+            .size()
+            .unstack(fill_value=0)
+            .reset_index()
+            .rename(columns={"canonical_company": "account_name"})
+        )
+
         profiles = profiles.merge(rel_counts, on="account_name", how="left")
+        profiles = profiles.merge(role_matrix, on="account_name", how="left")
     else:
         profiles["relationship_inventory"] = 0
 
     profiles["relationship_inventory"] = pd.to_numeric(profiles["relationship_inventory"], errors="coerce").fillna(0).astype(int)
+
+    for role in COVERAGE_ROLES:
+        if role not in profiles.columns:
+            profiles[role] = 0
+        profiles[role] = pd.to_numeric(profiles[role], errors="coerce").fillna(0).astype(int)
+
+    profiles["coverage_roles_filled"] = profiles[COVERAGE_ROLES].apply(lambda r: sum(1 for x in r if x > 0), axis=1)
+    profiles["coverage_score"] = ((profiles["coverage_roles_filled"] / len(COVERAGE_ROLES)) * 100).round(0).astype(int)
+    profiles["missing_roles"] = profiles.apply(lambda r: ", ".join([role for role in COVERAGE_ROLES if r[role] == 0]) or "None", axis=1)
+
     profiles["total_mw"] = profiles["total_mw"].fillna(0)
     profiles["avg_capture_score"] = profiles["avg_capture_score"].round(1)
     profiles["relationship_coverage_ratio"] = (profiles["relationship_inventory"] / profiles["total_projects"]).round(2)
 
     profiles["account_risk"] = profiles.apply(
-        lambda r: "Critical" if r["max_capture_score"] >= 90 and r["relationship_coverage_ratio"] < 3
-        else "Elevated" if r["max_capture_score"] >= 75 and r["relationship_coverage_ratio"] < 5
+        lambda r: "Critical" if r["max_capture_score"] >= 90 and (r["relationship_coverage_ratio"] < 3 or r["coverage_score"] < 45)
+        else "Elevated" if r["max_capture_score"] >= 75 and (r["relationship_coverage_ratio"] < 5 or r["coverage_score"] < 60)
         else "Monitor",
         axis=1,
     )
 
     profiles["account_priority"] = profiles.apply(
-        lambda r: (r["max_capture_score"] * 2) + (r["total_projects"] * 3) + (min(r["total_mw"], 1000) / 10) - min(r["relationship_inventory"], 50),
+        lambda r: (r["max_capture_score"] * 2)
+        + (r["total_projects"] * 3)
+        + (min(r["total_mw"], 1000) / 10)
+        - min(r["relationship_inventory"], 50)
+        + (100 - r["coverage_score"]),
         axis=1,
     )
 
@@ -695,6 +850,7 @@ prime_only = st.sidebar.checkbox("Prime Positioning Only")
 predictive_only = st.sidebar.checkbox("Predictive Signals Only")
 watchlist_only = st.sidebar.checkbox("Watchlist Only")
 relationship_gaps_only = st.sidebar.checkbox("Relationship Gaps Only")
+coverage_gaps_only = st.sidebar.checkbox("Coverage Gaps Only")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Alert Thresholds")
@@ -728,6 +884,12 @@ if not filtered_df.empty:
         ]["canonical_project_name"].tolist()
         filtered_df = filtered_df[filtered_df["canonical_project_name"].isin(gap_names)]
 
+    if coverage_gaps_only and not st.session_state.gap_report_df.empty:
+        gap_names = st.session_state.gap_report_df[
+            st.session_state.gap_report_df["coverage_score"] < 45
+        ]["canonical_project_name"].tolist()
+        filtered_df = filtered_df[filtered_df["canonical_project_name"].isin(gap_names)]
+
 
 st.markdown(
     """
@@ -753,7 +915,7 @@ st.markdown(
         font-weight: 600;
     }
     .ribbon-card {
-        height: 255px;
+        height: 275px;
         border: 1px solid #1f2a3a;
         border-top: 4px solid var(--accent);
         background: linear-gradient(145deg, #060a0f 0%, #101824 100%);
@@ -831,7 +993,7 @@ st.markdown(
 )
 
 st.title("Infrastructure Intelligence Operating System")
-st.caption("Allen Hammett AI — Executive Infrastructure Intelligence + Revenue Account Intelligence + Capture Operations")
+st.caption("Allen Hammett AI — Executive Infrastructure Intelligence + Relationship Coverage Engine + Revenue Account Intelligence")
 
 ribbon_df = build_ribbon_df(filtered_df, relationships_df)
 
@@ -850,11 +1012,12 @@ else:
         score = int(safe_number(item.get("early_capture_score"), 0))
         mw = safe_number(item.get("estimated_power_mw"), 0)
         rel_count = int(safe_number(item.get("relationship_count"), 0))
+        coverage_score = int(safe_number(item.get("coverage_score"), 0))
         stage = clean_value(item.get("capture_stage"), "Unknown")
         market = clean_value(item.get("market_cluster"), "Unknown Market")
 
         if status == "CRITICAL":
-            action_text = "Expand relationship coverage now."
+            action_text = "Fill stakeholder coverage gaps now."
         elif status == "PRIME":
             action_text = "Escalate BD positioning."
         elif status == "POWER RISK":
@@ -875,6 +1038,7 @@ else:
                             Score: <b>{score}</b><br/>
                             MW: <b>{int(mw) if mw > 0 else "N/A"}</b><br/>
                             Relationships: <b>{rel_count}</b><br/>
+                            Coverage: <b>{coverage_score}%</b><br/>
                             Stage: <b>{stage}</b><br/>
                             Market: <b>{market}</b>
                         </div>
@@ -899,12 +1063,13 @@ active_df = filtered_df[
 if not active_df.empty:
     active_row = active_df.iloc[0]
     active_rels, active_source = recover_relationships_for_project(active_row, relationships_df)
+    active_coverage_summary, active_coverage_score, active_missing_roles, active_coverage_status = build_coverage_summary(active_rels)
 
     active_score = int(safe_number(active_row.get("early_capture_score"), 0))
     active_mw = safe_number(active_row.get("estimated_power_mw"), 0)
     active_relationships = len(active_rels)
-    active_threat = threat_level(active_score, active_mw, active_relationships)
-    active_readiness = deal_readiness(active_score, active_relationships, active_mw)
+    active_threat = threat_level(active_score, active_mw, active_relationships, active_coverage_score)
+    active_readiness = deal_readiness(active_score, active_relationships, active_mw, active_coverage_score)
 
     st.markdown(
         f"""
@@ -912,7 +1077,7 @@ if not active_df.empty:
             <div class="active-strip-title">Active Opportunity</div>
             <div class="active-strip-name">{active_project_name}</div>
             <div class="active-strip-meta">
-                Score {active_score} • Readiness {int(active_readiness)}% • Threat {active_threat} • Relationships {active_relationships} • MW {int(active_mw) if active_mw > 0 else "N/A"} • {active_source}
+                Score {active_score} • Readiness {int(active_readiness)}% • Threat {active_threat} • Relationships {active_relationships} • Coverage {active_coverage_score}% • Missing {active_missing_roles} • MW {int(active_mw) if active_mw > 0 else "N/A"}
             </div>
         </div>
         """,
@@ -959,6 +1124,7 @@ with main_tab:
             map_df = add_relationship_counts_for_subset(map_df, relationships_df)
 
             map_df["relationship_count"] = pd.to_numeric(map_df.get("relationship_count", 0), errors="coerce").fillna(0).astype(int)
+            map_df["coverage_score"] = pd.to_numeric(map_df.get("coverage_score", 0), errors="coerce").fillna(0).astype(int)
             map_df["estimated_power_mw"] = pd.to_numeric(map_df.get("estimated_power_mw", 0), errors="coerce").fillna(0)
             map_df["early_capture_score"] = pd.to_numeric(map_df.get("early_capture_score", 0), errors="coerce").fillna(0)
 
@@ -997,9 +1163,9 @@ with main_tab:
                     <b>{canonical_project_name}</b><br/>
                     Score: {early_capture_score}<br/>
                     Stage: {capture_stage}<br/>
-                    Type: {infrastructure_type}<br/>
                     MW: {estimated_power_mw}<br/>
                     Relationships: {relationship_count}<br/>
+                    Coverage: {coverage_score}%<br/>
                     County: {county}<br/>
                     Market: {market_cluster}
                 </div>
@@ -1043,9 +1209,9 @@ with main_tab:
                     alerts.append(f"Power demand signal: {clean_value(row.get('canonical_project_name'))} estimated at {clean_value(row.get('estimated_power_mw'))} MW")
 
             if not st.session_state.gap_report_df.empty:
-                gap_df = st.session_state.gap_report_df[st.session_state.gap_report_df["relationship_count"] == 0]
+                gap_df = st.session_state.gap_report_df[st.session_state.gap_report_df["coverage_score"] < 45]
                 for _, row in gap_df.head(4).iterrows():
-                    alerts.append(f"Relationship gap: {clean_value(row.get('canonical_project_name'))} has no recovered contacts.")
+                    alerts.append(f"Coverage gap: {clean_value(row.get('canonical_project_name'))} missing {clean_value(row.get('missing_roles'))}.")
 
             if alert_company_keyword:
                 keyword_df = filtered_df[
@@ -1106,9 +1272,10 @@ with operations_tab:
                 project_name = clean_value(project.get("canonical_project_name"), "Unnamed Project")
                 score = clean_value(project.get("early_capture_score"), "0")
                 rel_count = clean_value(project.get("relationship_count"), "0")
+                coverage_score = clean_value(project.get("coverage_score"), "0")
                 project_id = clean_value(project.get("id"), f"row_{idx}")
 
-                if st.button(f"{project_name} | Score {score} | Rel {rel_count}", use_container_width=True, key=f"project_select_{project_id}_{idx}"):
+                if st.button(f"{project_name} | Score {score} | Rel {rel_count} | Cov {coverage_score}%", use_container_width=True, key=f"project_select_{project_id}_{idx}"):
                     st.session_state.selected_project = project_name
                     st.session_state.ribbon_message = f"{project_name} is now the active opportunity."
                     st.rerun()
@@ -1150,23 +1317,25 @@ with operations_tab:
             else:
                 row = selected_df.iloc[0]
                 project_relationships, match_note = recover_relationships_for_project(row, relationships_df)
+                coverage_summary, coverage_score, missing_roles, coverage_status = build_coverage_summary(project_relationships)
 
                 st.markdown(f"# {selected_project}")
 
-                s1, s2, s3, s4, s5 = st.columns(5)
+                s1, s2, s3, s4, s5, s6 = st.columns(6)
                 s1.metric("Score", clean_value(row.get("early_capture_score")))
                 s2.metric("Stage", clean_value(row.get("capture_stage")))
                 s3.metric("MW", clean_value(row.get("estimated_power_mw")))
                 s4.metric("Relationships", len(project_relationships))
-                s5.metric("Predictive", clean_bool(row.get("predictive_signal")))
+                s5.metric("Coverage", f"{coverage_score}%")
+                s6.metric("Coverage Status", coverage_status)
 
                 st.caption(match_note)
 
                 st.markdown("## AI Recommended Actions")
-                for action in recommended_actions(row, len(project_relationships)):
+                for action in recommended_actions(row, len(project_relationships), coverage_score, missing_roles):
                     st.success(action)
 
-                overview_tab, strategy_tab, relationship_tab, permit_tab, raw_tab = st.tabs(["Overview", "Strategy", "Relationships", "Permit", "Raw Intel"])
+                overview_tab, strategy_tab, coverage_tab, relationship_tab, permit_tab, raw_tab = st.tabs(["Overview", "Strategy", "Coverage", "Relationships", "Permit", "Raw Intel"])
 
                 with overview_tab:
                     c1, c2 = st.columns(2)
@@ -1194,6 +1363,17 @@ with operations_tab:
                             if risk.strip():
                                 st.warning(risk.strip())
 
+                with coverage_tab:
+                    st.markdown("### Relationship Coverage Matrix")
+                    coverage_df = pd.DataFrame(
+                        [{"Coverage Lane": role, "Contacts": count, "Covered": "Yes" if count > 0 else "No"} for role, count in coverage_summary.items()]
+                    )
+                    st.dataframe(coverage_df, use_container_width=True, height=300)
+                    if missing_roles != "None":
+                        st.warning(f"Missing stakeholder lanes: {missing_roles}")
+                    else:
+                        st.success("All critical stakeholder lanes have at least one mapped relationship.")
+
                 with relationship_tab:
                     st.markdown("### Executive Relationship Intelligence")
                     if project_relationships.empty:
@@ -1201,7 +1381,7 @@ with operations_tab:
                     else:
                         st.success(f"{len(project_relationships)} executive relationships identified")
                         st.caption(match_note)
-                        relationship_columns = ["full_name", "title", "company", "email", "linkedin_url", "influence_score", "influence_tier", "match_type", "matched_company_aliases"]
+                        relationship_columns = ["full_name", "title", "company", "relationship_role", "email", "linkedin_url", "influence_score", "influence_tier", "match_type", "matched_company_aliases"]
                         existing_cols = [c for c in relationship_columns if c in project_relationships.columns]
                         st.dataframe(project_relationships[existing_cols], use_container_width=True, height=450)
 
@@ -1235,21 +1415,23 @@ with deal_tab:
         else:
             row = selected_df.iloc[0]
             project_relationships, match_note = recover_relationships_for_project(row, relationships_df)
+            coverage_summary, coverage_score, missing_roles, coverage_status = build_coverage_summary(project_relationships)
 
             relationship_count = len(project_relationships)
             score = safe_number(row.get("early_capture_score"), 0)
             mw = safe_number(row.get("estimated_power_mw"), 0)
-            threat = threat_level(score, mw, relationship_count)
-            readiness = deal_readiness(score, relationship_count, mw)
+            threat = threat_level(score, mw, relationship_count, coverage_score)
+            readiness = deal_readiness(score, relationship_count, mw, coverage_score)
 
             st.markdown(f"### {selected_project}")
 
-            d1, d2, d3, d4, d5 = st.columns(5)
+            d1, d2, d3, d4, d5, d6 = st.columns(6)
             d1.metric("Capture Score", int(score))
             d2.metric("Deal Readiness", f"{int(readiness)}%")
             d3.metric("MW Opportunity", int(mw) if mw > 0 else "N/A")
             d4.metric("Relationships", relationship_count)
-            d5.metric("Threat Level", threat)
+            d5.metric("Coverage", f"{coverage_score}%")
+            d6.metric("Threat Level", threat)
 
             st.caption(match_note)
 
@@ -1259,7 +1441,7 @@ with deal_tab:
 
             with control_left:
                 st.markdown("### Recommended BD Moves")
-                for action in recommended_actions(row, relationship_count):
+                for action in recommended_actions(row, relationship_count, coverage_score, missing_roles):
                     st.success(action)
 
                 st.markdown("### Deal Control Summary")
@@ -1269,6 +1451,7 @@ with deal_tab:
                 st.markdown(f"**Market Cluster:** {clean_value(row.get('market_cluster'))}")
                 st.markdown(f"**County:** {clean_value(row.get('county'))}")
                 st.markdown(f"**Utility Dependency:** {clean_value(row.get('utility_dependency'))}")
+                st.markdown(f"**Missing Coverage Lanes:** {missing_roles}")
 
             with control_right:
                 st.markdown("### Threat Intelligence")
@@ -1282,20 +1465,26 @@ with deal_tab:
                 st.markdown("### Relationship Penetration")
                 if relationship_count == 0:
                     st.error("No mapped or recovered executive relationships.")
-                elif relationship_count < 3:
-                    st.warning("Limited relationship coverage.")
-                elif relationship_count < 8:
-                    st.info("Moderate relationship coverage.")
+                elif coverage_score < 45:
+                    st.error("Relationship lanes are critically incomplete.")
+                elif coverage_score < 75:
+                    st.warning("Moderate relationship coverage. Fill missing lanes.")
                 else:
                     st.success("Strong relationship coverage.")
 
             st.markdown("---")
+            st.markdown("### Coverage Matrix")
+            coverage_df = pd.DataFrame(
+                [{"Coverage Lane": role, "Contacts": count, "Covered": "Yes" if count > 0 else "No"} for role, count in coverage_summary.items()]
+            )
+            st.dataframe(coverage_df, use_container_width=True, height=300)
+
             st.markdown("### Executive Influence Ranking")
 
             if project_relationships.empty:
                 st.warning("No executive relationships mapped to this opportunity.")
             else:
-                influence_cols = ["full_name", "title", "company", "email", "linkedin_url", "influence_score", "influence_tier", "match_type", "matched_company_aliases"]
+                influence_cols = ["full_name", "title", "company", "relationship_role", "email", "linkedin_url", "influence_score", "influence_tier", "match_type", "matched_company_aliases"]
                 available_influence_cols = [c for c in influence_cols if c in project_relationships.columns]
                 st.dataframe(project_relationships[available_influence_cols], use_container_width=True, height=450)
 
@@ -1314,7 +1503,7 @@ with relationships_tab:
             )
         ]
 
-    relationship_columns = ["canonical_project_name", "company", "canonical_company", "full_name", "title", "email", "linkedin_url", "influence_score", "influence_tier"]
+    relationship_columns = ["canonical_project_name", "company", "canonical_company", "full_name", "title", "relationship_role", "email", "linkedin_url", "influence_score", "influence_tier"]
     existing_relationship_cols = [c for c in relationship_columns if c in display_relationships.columns]
 
     if display_relationships.empty:
@@ -1333,12 +1522,13 @@ with accounts_tab:
     else:
         top_accounts = account_profiles.head(20)
 
-        a1, a2, a3, a4, a5 = st.columns(5)
+        a1, a2, a3, a4, a5, a6 = st.columns(6)
         a1.metric("Strategic Accounts", len(account_profiles))
         a2.metric("Tracked Projects", int(account_profiles["total_projects"].sum()))
         a3.metric("Known Relationships", int(account_profiles["relationship_inventory"].sum()))
         a4.metric("Prime Projects", int(account_profiles["prime_projects"].sum()))
         a5.metric("Total MW", int(account_profiles["total_mw"].sum()))
+        a6.metric("Avg Coverage", f"{int(account_profiles['coverage_score'].mean())}%")
 
         st.markdown("### Account Priority Board")
         st.dataframe(
@@ -1349,10 +1539,10 @@ with accounts_tab:
                     "total_mw",
                     "avg_capture_score",
                     "max_capture_score",
-                    "prime_projects",
-                    "strategic_projects",
                     "relationship_inventory",
                     "relationship_coverage_ratio",
+                    "coverage_score",
+                    "missing_roles",
                     "account_risk",
                 ]
             ],
@@ -1373,19 +1563,26 @@ with accounts_tab:
 
         st.markdown(f"## {selected_account} Account Control")
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
         c1.metric("Projects", int(selected_profile["total_projects"]))
         c2.metric("Total MW", int(selected_profile["total_mw"]))
         c3.metric("Max Score", int(selected_profile["max_capture_score"]))
         c4.metric("Relationships", int(selected_profile["relationship_inventory"]))
-        c5.metric("Risk", selected_profile["account_risk"])
+        c5.metric("Coverage", f"{int(selected_profile['coverage_score'])}%")
+        c6.metric("Risk", selected_profile["account_risk"])
 
         if selected_profile["account_risk"] == "Critical":
-            st.error("Account risk is critical: high-value opportunity concentration with insufficient relationship coverage.")
+            st.error(f"Account risk is critical. Missing lanes: {selected_profile['missing_roles']}")
         elif selected_profile["account_risk"] == "Elevated":
-            st.warning("Account requires BD attention: relationship penetration is below preferred strategic coverage.")
+            st.warning(f"Account requires BD attention. Missing lanes: {selected_profile['missing_roles']}")
         else:
             st.success("Account is in monitoring posture.")
+
+        st.markdown("### Account Coverage Matrix")
+        account_coverage_df = pd.DataFrame(
+            [{"Coverage Lane": role, "Contacts": int(selected_profile[role]), "Covered": "Yes" if int(selected_profile[role]) > 0 else "No"} for role in COVERAGE_ROLES]
+        )
+        st.dataframe(account_coverage_df, use_container_width=True, height=300)
 
         account_project_df = filtered_df.copy()
         if not account_project_df.empty:
@@ -1414,7 +1611,7 @@ with accounts_tab:
         if account_relationships.empty:
             st.warning("No executive relationships currently mapped to this account.")
         else:
-            rel_cols = ["full_name", "title", "company", "email", "linkedin_url", "influence_score", "influence_tier"]
+            rel_cols = ["full_name", "title", "company", "relationship_role", "email", "linkedin_url", "influence_score", "influence_tier"]
             available_rel_cols = [c for c in rel_cols if c in account_relationships.columns]
             st.dataframe(
                 account_relationships[available_rel_cols].sort_values("influence_score", ascending=False).head(50),
@@ -1461,17 +1658,13 @@ with analytics_tab:
                 st.plotly_chart(fig, use_container_width=True)
 
     with b2:
-        st.markdown("### Relationship Influence Leaders")
-        if not relationships_df.empty and "influence_score" in relationships_df.columns:
-            leader_cols = ["full_name", "title", "company", "canonical_company", "influence_score", "influence_tier"]
-            available_leader_cols = [c for c in leader_cols if c in relationships_df.columns]
-            st.dataframe(
-                relationships_df[available_leader_cols]
-                .sort_values("influence_score", ascending=False)
-                .head(15),
-                use_container_width=True,
-                height=360,
-            )
+        st.markdown("### Relationship Role Distribution")
+        if not relationships_df.empty and "relationship_role" in relationships_df.columns:
+            role_chart = relationships_df["relationship_role"].value_counts().reset_index()
+            role_chart.columns = ["Role", "Contacts"]
+            fig = px.bar(role_chart, x="Role", y="Contacts", template="plotly_dark", color="Role")
+            fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
 
 
 with exports_tab:
@@ -1513,9 +1706,9 @@ with exports_tab:
 
     if not st.session_state.gap_report_df.empty:
         st.download_button(
-            "Download Relationship Recovery Gap Report",
+            "Download Relationship Coverage Gap Report",
             st.session_state.gap_report_df.to_csv(index=False),
-            "relationship_recovery_gap_report.csv",
+            "relationship_coverage_gap_report.csv",
             "text/csv",
             key="download_relationship_gap_report",
         )
