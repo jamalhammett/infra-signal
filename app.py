@@ -17,10 +17,7 @@ st.set_page_config(
 )
 
 DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
-PASSWORD_RESET_KEY = st.secrets.get(
-    "PASSWORD_RESET_KEY",
-    os.getenv("PASSWORD_RESET_KEY", "AH_RESET_2026"),
-)
+PASSWORD_RESET_KEY = st.secrets.get("PASSWORD_RESET_KEY", os.getenv("PASSWORD_RESET_KEY", "AH_RESET_2026"))
 
 
 def run_query(sql, params=None):
@@ -147,42 +144,15 @@ def extract_project_companies(row):
             if value:
                 detected.add(canonical_company(value))
 
-    combined = " ".join(
-        [
-            normalize_text(row.get(field))
-            for field in candidate_fields
-            if field in row.index
-        ]
-    )
+    combined = " ".join([normalize_text(row.get(field)) for field in candidate_fields if field in row.index])
 
     known_companies = [
-        "vantage",
-        "qts",
-        "stack",
-        "digital realty",
-        "equinix",
-        "cyrusone",
-        "aligned",
-        "coresite",
-        "cologix",
-        "dominion energy",
-        "novec",
-        "dpr construction",
-        "turner construction",
-        "hitt",
-        "clayco",
-        "whiting turner",
-        "burns mcdonnell",
-        "jacobs",
-        "hdr",
-        "black veatch",
-        "zayo",
-        "lumen",
-        "crown castle",
-        "compass datacenters",
-        "ntt global data centers",
-        "edgecore",
-        "databank",
+        "vantage", "qts", "stack", "digital realty", "equinix", "cyrusone",
+        "aligned", "coresite", "cologix", "dominion energy", "novec",
+        "dpr construction", "turner construction", "hitt", "clayco",
+        "whiting turner", "burns mcdonnell", "jacobs", "hdr", "black veatch",
+        "zayo", "lumen", "crown castle", "compass datacenters",
+        "ntt global data centers", "edgecore", "databank",
     ]
 
     for company in known_companies:
@@ -341,9 +311,7 @@ def recommended_actions(row, relationships_count):
         actions.append("Track as strategic development opportunity.")
 
     if "data center" in infrastructure_type:
-        actions.append(
-            "Assess hyperscale ecosystem: utility, fiber, security, compliance, and construction stakeholders."
-        )
+        actions.append("Assess hyperscale ecosystem: utility, fiber, security, compliance, and construction stakeholders.")
 
     if utility_dependency != "":
         actions.append(f"Map utility relationship path connected to {utility_dependency}.")
@@ -438,7 +406,7 @@ def login_gate():
     st.stop()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def load_projects():
     df = run_query(
         """
@@ -456,18 +424,11 @@ def load_projects():
     if "early_capture_score" not in df.columns:
         df["early_capture_score"] = 0
 
-    df["early_capture_score"] = pd.to_numeric(
-        df["early_capture_score"],
-        errors="coerce",
-    ).fillna(0)
-
+    df["early_capture_score"] = pd.to_numeric(df["early_capture_score"], errors="coerce").fillna(0)
     df["capture_stage"] = df["early_capture_score"].apply(capture_stage)
 
     if "estimated_power_mw" in df.columns:
-        df["estimated_power_mw"] = pd.to_numeric(
-            df["estimated_power_mw"],
-            errors="coerce",
-        )
+        df["estimated_power_mw"] = pd.to_numeric(df["estimated_power_mw"], errors="coerce")
     else:
         df["estimated_power_mw"] = 0
 
@@ -477,7 +438,7 @@ def load_projects():
     return df
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def load_relationships():
     try:
         df = run_query(
@@ -549,86 +510,43 @@ def recover_relationships_for_project(project_row, relationships_df):
     return recovered, f"Recovered through company aliases: {', '.join(sorted(project_companies))}"
 
 
-def build_project_relationship_counts(projects_df, relationships_df):
+def relationship_count_fast(project_row, relationships_df):
+    rels, source = recover_relationships_for_project(project_row, relationships_df)
+    return len(rels), source
+
+
+def add_relationship_counts_for_subset(df, relationships_df):
+    if df.empty:
+        return df
+
+    working_df = df.copy()
     counts = []
+    sources = []
 
-    if projects_df.empty:
-        return pd.DataFrame(
-            columns=[
-                "canonical_project_name",
-                "relationship_count",
-                "relationship_source",
-            ]
-        )
+    for _, row in working_df.iterrows():
+        count, source = relationship_count_fast(row, relationships_df)
+        counts.append(count)
+        sources.append(source)
 
-    for _, row in projects_df.iterrows():
-        name = clean_value(row.get("canonical_project_name"), "")
-        rels, source = recover_relationships_for_project(row, relationships_df)
+    working_df["relationship_count"] = counts
+    working_df["relationship_source"] = sources
 
-        counts.append(
-            {
-                "canonical_project_name": name,
-                "relationship_count": len(rels),
-                "relationship_source": source,
-            }
-        )
-
-    return pd.DataFrame(counts)
-
-
-def normalize_relationship_count_columns(df):
-    if "relationship_count_y" in df.columns:
-        df["relationship_count"] = df["relationship_count_y"]
-    elif "relationship_count_x" in df.columns:
-        df["relationship_count"] = df["relationship_count_x"]
-    elif "relationship_count" not in df.columns:
-        df["relationship_count"] = 0
-
-    df["relationship_count"] = (
-        pd.to_numeric(df["relationship_count"], errors="coerce")
-        .fillna(0)
-        .astype(int)
-    )
-
-    drop_cols = [
-        col
-        for col in ["relationship_count_x", "relationship_count_y"]
-        if col in df.columns
-    ]
-
-    if drop_cols:
-        df = df.drop(columns=drop_cols)
-
-    return df
+    return working_df
 
 
 def build_ribbon_df(projects_df, relationships_df):
     if projects_df.empty:
         return pd.DataFrame()
 
-    ribbon_df = projects_df.copy()
-    rel_counts = build_project_relationship_counts(ribbon_df, relationships_df)
-
-    ribbon_df = ribbon_df.merge(
-        rel_counts,
-        on="canonical_project_name",
-        how="left",
-    )
-
-    ribbon_df = normalize_relationship_count_columns(ribbon_df)
+    ribbon_df = projects_df.copy().head(60)
+    ribbon_df = add_relationship_counts_for_subset(ribbon_df, relationships_df)
 
     if "estimated_power_mw" in ribbon_df.columns:
-        ribbon_df["estimated_power_mw"] = pd.to_numeric(
-            ribbon_df["estimated_power_mw"],
-            errors="coerce",
-        ).fillna(0)
+        ribbon_df["estimated_power_mw"] = pd.to_numeric(ribbon_df["estimated_power_mw"], errors="coerce").fillna(0)
     else:
         ribbon_df["estimated_power_mw"] = 0
 
-    ribbon_df["early_capture_score"] = pd.to_numeric(
-        ribbon_df["early_capture_score"],
-        errors="coerce",
-    ).fillna(0)
+    ribbon_df["early_capture_score"] = pd.to_numeric(ribbon_df["early_capture_score"], errors="coerce").fillna(0)
 
     ribbon_df["opportunity_status"] = ribbon_df.apply(
         lambda r: opportunity_status(
@@ -664,12 +582,30 @@ def build_ribbon_df(projects_df, relationships_df):
     )
 
 
+def build_gap_report(projects_df, relationships_df):
+    if projects_df.empty:
+        return pd.DataFrame(columns=["canonical_project_name", "relationship_count", "relationship_source"])
+
+    rows = []
+
+    for _, row in projects_df.iterrows():
+        name = clean_value(row.get("canonical_project_name"), "")
+        count, source = relationship_count_fast(row, relationships_df)
+        rows.append(
+            {
+                "canonical_project_name": name,
+                "relationship_count": count,
+                "relationship_source": source,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 login_gate()
 
 projects_df = load_projects()
 relationships_df = load_relationships()
-
-relationship_counts_df = build_project_relationship_counts(projects_df, relationships_df)
 
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = []
@@ -682,6 +618,9 @@ if "selected_project" not in st.session_state:
 
 if "ribbon_message" not in st.session_state:
     st.session_state.ribbon_message = ""
+
+if "gap_report_df" not in st.session_state:
+    st.session_state.gap_report_df = pd.DataFrame()
 
 
 st.sidebar.header("Executive Command Filters")
@@ -700,14 +639,6 @@ alert_company_keyword = st.sidebar.text_input("Company / Utility Keyword")
 filtered_df = projects_df.copy()
 
 if not filtered_df.empty:
-    filtered_df = filtered_df.merge(
-        relationship_counts_df,
-        on="canonical_project_name",
-        how="left",
-    )
-
-    filtered_df = normalize_relationship_count_columns(filtered_df)
-
     if global_search:
         filtered_df = filtered_df[
             filtered_df.astype(str).apply(
@@ -723,12 +654,13 @@ if not filtered_df.empty:
         filtered_df = filtered_df[filtered_df["predictive_signal"] == True]
 
     if watchlist_only and st.session_state.watchlist:
-        filtered_df = filtered_df[
-            filtered_df["canonical_project_name"].isin(st.session_state.watchlist)
-        ]
+        filtered_df = filtered_df[filtered_df["canonical_project_name"].isin(st.session_state.watchlist)]
 
-    if relationship_gaps_only:
-        filtered_df = filtered_df[filtered_df["relationship_count"] == 0]
+    if relationship_gaps_only and not st.session_state.gap_report_df.empty:
+        gap_names = st.session_state.gap_report_df[
+            st.session_state.gap_report_df["relationship_count"] == 0
+        ]["canonical_project_name"].tolist()
+        filtered_df = filtered_df[filtered_df["canonical_project_name"].isin(gap_names)]
 
 
 st.markdown(
@@ -941,30 +873,15 @@ with main_tab:
     k1, k2, k3, k4, k5, k6 = st.columns(6)
 
     k1.metric("Signals", len(filtered_df))
-    k2.metric(
-        "Prime",
-        len(filtered_df[filtered_df["capture_stage"] == "Prime Positioning"])
-        if not filtered_df.empty
-        else 0,
-    )
-    k3.metric(
-        "Predictive",
-        len(filtered_df[filtered_df["predictive_signal"] == True])
-        if not filtered_df.empty and "predictive_signal" in filtered_df.columns
-        else 0,
-    )
+    k2.metric("Prime", len(filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]) if not filtered_df.empty else 0)
+    k3.metric("Predictive", len(filtered_df[filtered_df["predictive_signal"] == True]) if not filtered_df.empty and "predictive_signal" in filtered_df.columns else 0)
     k4.metric("Relationships", len(relationships_df))
     k5.metric("Watchlist", len(st.session_state.watchlist))
-    k6.metric(
-        "Mapped",
-        len(filtered_df.dropna(subset=["latitude", "longitude"]))
-        if not filtered_df.empty and {"latitude", "longitude"}.issubset(filtered_df.columns)
-        else 0,
-    )
+    k6.metric("Mapped", len(filtered_df.dropna(subset=["latitude", "longitude"])) if not filtered_df.empty and {"latitude", "longitude"}.issubset(filtered_df.columns) else 0)
 
     st.markdown("## Infrastructure Intelligence Map")
 
-    map_df = filtered_df.copy()
+    map_df = filtered_df.head(1000).copy()
 
     if not map_df.empty and {"latitude", "longitude"}.issubset(map_df.columns):
         map_df["latitude"] = pd.to_numeric(map_df["latitude"], errors="coerce")
@@ -972,23 +889,13 @@ with main_tab:
         map_df = map_df.dropna(subset=["latitude", "longitude"]).copy()
 
         if not map_df.empty:
-            map_df["relationship_count"] = pd.to_numeric(
-                map_df.get("relationship_count", 0),
-                errors="coerce",
-            ).fillna(0).astype(int)
+            map_df = add_relationship_counts_for_subset(map_df, relationships_df)
 
-            map_df["estimated_power_mw"] = pd.to_numeric(
-                map_df.get("estimated_power_mw", 0),
-                errors="coerce",
-            ).fillna(0)
-
-            map_df["early_capture_score"] = pd.to_numeric(
-                map_df.get("early_capture_score", 0),
-                errors="coerce",
-            ).fillna(0)
+            map_df["relationship_count"] = pd.to_numeric(map_df.get("relationship_count", 0), errors="coerce").fillna(0).astype(int)
+            map_df["estimated_power_mw"] = pd.to_numeric(map_df.get("estimated_power_mw", 0), errors="coerce").fillna(0)
+            map_df["early_capture_score"] = pd.to_numeric(map_df.get("early_capture_score", 0), errors="coerce").fillna(0)
 
             map_df["color"] = map_df["early_capture_score"].apply(signal_color)
-
             map_df["radius"] = map_df.apply(
                 lambda r: signal_radius(
                     r.get("early_capture_score", 0),
@@ -1061,24 +968,17 @@ with main_tab:
         if not filtered_df.empty:
             high_score_df = filtered_df[filtered_df["early_capture_score"] >= alert_score_threshold]
             for _, row in high_score_df.head(4).iterrows():
-                alerts.append(
-                    f"High-priority signal: {clean_value(row.get('canonical_project_name'))} scored {clean_value(row.get('early_capture_score'))}"
-                )
+                alerts.append(f"High-priority signal: {clean_value(row.get('canonical_project_name'))} scored {clean_value(row.get('early_capture_score'))}")
 
             if "estimated_power_mw" in filtered_df.columns:
-                mw_df = filtered_df[
-                    pd.to_numeric(filtered_df["estimated_power_mw"], errors="coerce") >= alert_mw_threshold
-                ]
+                mw_df = filtered_df[pd.to_numeric(filtered_df["estimated_power_mw"], errors="coerce") >= alert_mw_threshold]
                 for _, row in mw_df.head(4).iterrows():
-                    alerts.append(
-                        f"Power demand signal: {clean_value(row.get('canonical_project_name'))} estimated at {clean_value(row.get('estimated_power_mw'))} MW"
-                    )
+                    alerts.append(f"Power demand signal: {clean_value(row.get('canonical_project_name'))} estimated at {clean_value(row.get('estimated_power_mw'))} MW")
 
-            gap_df = filtered_df[filtered_df["relationship_count"] == 0]
-            for _, row in gap_df.head(4).iterrows():
-                alerts.append(
-                    f"Relationship gap: {clean_value(row.get('canonical_project_name'))} has no recovered contacts."
-                )
+            if not st.session_state.gap_report_df.empty:
+                gap_df = st.session_state.gap_report_df[st.session_state.gap_report_df["relationship_count"] == 0]
+                for _, row in gap_df.head(4).iterrows():
+                    alerts.append(f"Relationship gap: {clean_value(row.get('canonical_project_name'))} has no recovered contacts.")
 
             if alert_company_keyword:
                 keyword_df = filtered_df[
@@ -1087,11 +987,8 @@ with main_tab:
                         axis=1,
                     )
                 ]
-
                 for _, row in keyword_df.head(4).iterrows():
-                    alerts.append(
-                        f"Keyword signal '{alert_company_keyword}': {clean_value(row.get('canonical_project_name'))}"
-                    )
+                    alerts.append(f"Keyword signal '{alert_company_keyword}': {clean_value(row.get('canonical_project_name'))}")
 
         if alerts:
             for alert in alerts[:6]:
@@ -1101,24 +998,11 @@ with main_tab:
 
     with signal_col2:
         st.markdown("### Top Priority Queue")
-
-        priority_cols = [
-            "canonical_project_name",
-            "early_capture_score",
-            "capture_stage",
-            "relationship_count",
-        ]
-
-        available_priority_cols = [
-            c for c in priority_cols if c in filtered_df.columns
-        ]
+        priority_cols = ["canonical_project_name", "early_capture_score", "capture_stage"]
+        available_priority_cols = [c for c in priority_cols if c in filtered_df.columns]
 
         if not filtered_df.empty:
-            st.dataframe(
-                filtered_df[available_priority_cols].head(10),
-                use_container_width=True,
-                height=300,
-            )
+            st.dataframe(filtered_df[available_priority_cols].head(10), use_container_width=True, height=300)
         else:
             st.info("No priority records available.")
 
@@ -1142,20 +1026,11 @@ with operations_tab:
             ]
 
         if not queue_df.empty:
-            queue_df = queue_df.sort_values(
-                by="early_capture_score",
-                ascending=False,
-            )
+            queue_df = queue_df.sort_values(by="early_capture_score", ascending=False)
 
-        queue_limit = st.slider(
-            "Visible Queue Size",
-            min_value=10,
-            max_value=200,
-            value=40,
-            key="visible_queue_size",
-        )
-
+        queue_limit = st.slider("Visible Queue Size", min_value=10, max_value=200, value=40, key="visible_queue_size")
         queue_df = queue_df.head(queue_limit)
+        queue_df = add_relationship_counts_for_subset(queue_df, relationships_df)
 
         if queue_df.empty:
             st.info("No projects match current filters.")
@@ -1166,11 +1041,7 @@ with operations_tab:
                 rel_count = clean_value(project.get("relationship_count"), "0")
                 project_id = clean_value(project.get("id"), f"row_{idx}")
 
-                if st.button(
-                    f"{project_name} | Score {score} | Rel {rel_count}",
-                    use_container_width=True,
-                    key=f"project_select_{project_id}_{idx}",
-                ):
+                if st.button(f"{project_name} | Score {score} | Rel {rel_count}", use_container_width=True, key=f"project_select_{project_id}_{idx}"):
                     st.session_state.selected_project = project_name
                     st.session_state.ribbon_message = f"{project_name} is now the active opportunity."
                     st.rerun()
@@ -1178,11 +1049,7 @@ with operations_tab:
         st.markdown("---")
         st.markdown("## Watchlist")
 
-        if st.button(
-            "⭐ Add Current Project",
-            use_container_width=True,
-            key="add_current_project_watchlist",
-        ):
+        if st.button("⭐ Add Current Project", use_container_width=True, key="add_current_project_watchlist"):
             current_project = st.session_state.selected_project
             if current_project and current_project not in st.session_state.watchlist:
                 st.session_state.watchlist.append(current_project)
@@ -1193,17 +1060,11 @@ with operations_tab:
         else:
             for idx, watch_item in enumerate(list(st.session_state.watchlist)):
                 watch_col1, watch_col2 = st.columns([5, 1])
-
                 with watch_col1:
-                    if st.button(
-                        watch_item,
-                        key=f"watch_select_{idx}_{watch_item}",
-                        use_container_width=True,
-                    ):
+                    if st.button(watch_item, key=f"watch_select_{idx}_{watch_item}", use_container_width=True):
                         st.session_state.selected_project = watch_item
                         st.session_state.ribbon_message = f"{watch_item} is now the active opportunity."
                         st.rerun()
-
                 with watch_col2:
                     if st.button("❌", key=f"watch_remove_{idx}_{watch_item}"):
                         st.session_state.watchlist.remove(watch_item)
@@ -1215,9 +1076,7 @@ with operations_tab:
         if not selected_project:
             st.info("Select a project from the Priority Infrastructure Queue.")
         else:
-            selected_df = filtered_df[
-                filtered_df["canonical_project_name"].astype(str) == str(selected_project)
-            ]
+            selected_df = filtered_df[filtered_df["canonical_project_name"].astype(str) == str(selected_project)]
 
             if selected_df.empty:
                 st.warning("Selected project is not available under current filters.")
@@ -1240,19 +1099,15 @@ with operations_tab:
                 for action in recommended_actions(row, len(project_relationships)):
                     st.success(action)
 
-                overview_tab, strategy_tab, relationship_tab, permit_tab, raw_tab = st.tabs(
-                    ["Overview", "Strategy", "Relationships", "Permit", "Raw Intel"]
-                )
+                overview_tab, strategy_tab, relationship_tab, permit_tab, raw_tab = st.tabs(["Overview", "Strategy", "Relationships", "Permit", "Raw Intel"])
 
                 with overview_tab:
                     c1, c2 = st.columns(2)
-
                     with c1:
                         st.markdown(f"**Infrastructure Type:** {clean_value(row.get('infrastructure_type'))}")
                         st.markdown(f"**Project Stage:** {clean_value(row.get('project_stage'))}")
                         st.markdown(f"**County:** {clean_value(row.get('county'))}")
                         st.markdown(f"**Corridor:** {clean_value(row.get('corridor_region'))}")
-
                     with c2:
                         st.markdown(f"**Market Cluster:** {clean_value(row.get('market_cluster'))}")
                         st.markdown(f"**Utility Provider:** {clean_value(row.get('utility_dependency'))}")
@@ -1265,7 +1120,6 @@ with operations_tab:
 
                     st.markdown("### Infrastructure Risk Flags")
                     risk_flags = clean_value(row.get("risk_flags"), "")
-
                     if risk_flags == "":
                         st.success("No critical infrastructure risks detected.")
                     else:
@@ -1275,34 +1129,14 @@ with operations_tab:
 
                 with relationship_tab:
                     st.markdown("### Executive Relationship Intelligence")
-
                     if project_relationships.empty:
                         st.warning("No executive relationships identified after recovery pass.")
                     else:
                         st.success(f"{len(project_relationships)} executive relationships identified")
                         st.caption(match_note)
-
-                        relationship_columns = [
-                            "full_name",
-                            "title",
-                            "company",
-                            "email",
-                            "linkedin_url",
-                            "influence_score",
-                            "influence_tier",
-                            "match_type",
-                            "matched_company_aliases",
-                        ]
-
-                        existing_cols = [
-                            c for c in relationship_columns if c in project_relationships.columns
-                        ]
-
-                        st.dataframe(
-                            project_relationships[existing_cols],
-                            use_container_width=True,
-                            height=450,
-                        )
+                        relationship_columns = ["full_name", "title", "company", "email", "linkedin_url", "influence_score", "influence_tier", "match_type", "matched_company_aliases"]
+                        existing_cols = [c for c in relationship_columns if c in project_relationships.columns]
+                        st.dataframe(project_relationships[existing_cols], use_container_width=True, height=450)
 
                 with permit_tab:
                     st.markdown("### Permit Intelligence")
@@ -1310,7 +1144,6 @@ with operations_tab:
                     st.markdown(f"**Source Name:** {clean_value(row.get('source_name'))}")
                     st.markdown(f"**Source Type:** {clean_value(row.get('source_type'))}")
                     st.markdown(f"**Filing Date:** {clean_value(row.get('filing_date'))}")
-
                     st.markdown("### Permit Description")
                     st.write(clean_value(row.get("permit_description"), "No permit description available."))
 
@@ -1328,9 +1161,7 @@ with deal_tab:
     if not selected_project:
         st.info("Select a project from Opportunity Operations.")
     else:
-        selected_df = filtered_df[
-            filtered_df["canonical_project_name"].astype(str) == str(selected_project)
-        ]
+        selected_df = filtered_df[filtered_df["canonical_project_name"].astype(str) == str(selected_project)]
 
         if selected_df.empty:
             st.warning("Selected project is not available under current filters.")
@@ -1361,7 +1192,6 @@ with deal_tab:
 
             with control_left:
                 st.markdown("### Recommended BD Moves")
-
                 for action in recommended_actions(row, relationship_count):
                     st.success(action)
 
@@ -1375,7 +1205,6 @@ with deal_tab:
 
             with control_right:
                 st.markdown("### Threat Intelligence")
-
                 if threat == "Critical":
                     st.error("High-value opportunity with insufficient relationship coverage. Immediate BD escalation recommended.")
                 elif threat == "Elevated":
@@ -1384,7 +1213,6 @@ with deal_tab:
                     st.info("Opportunity remains under active monitoring. Maintain watch posture.")
 
                 st.markdown("### Relationship Penetration")
-
                 if relationship_count == 0:
                     st.error("No mapped or recovered executive relationships.")
                 elif relationship_count < 3:
@@ -1400,27 +1228,9 @@ with deal_tab:
             if project_relationships.empty:
                 st.warning("No executive relationships mapped to this opportunity.")
             else:
-                influence_cols = [
-                    "full_name",
-                    "title",
-                    "company",
-                    "email",
-                    "linkedin_url",
-                    "influence_score",
-                    "influence_tier",
-                    "match_type",
-                    "matched_company_aliases",
-                ]
-
-                available_influence_cols = [
-                    c for c in influence_cols if c in project_relationships.columns
-                ]
-
-                st.dataframe(
-                    project_relationships[available_influence_cols],
-                    use_container_width=True,
-                    height=450,
-                )
+                influence_cols = ["full_name", "title", "company", "email", "linkedin_url", "influence_score", "influence_tier", "match_type", "matched_company_aliases"]
+                available_influence_cols = [c for c in influence_cols if c in project_relationships.columns]
+                st.dataframe(project_relationships[available_influence_cols], use_container_width=True, height=450)
 
 
 with relationships_tab:
@@ -1437,30 +1247,13 @@ with relationships_tab:
             )
         ]
 
-    relationship_columns = [
-        "canonical_project_name",
-        "company",
-        "canonical_company",
-        "full_name",
-        "title",
-        "email",
-        "linkedin_url",
-        "influence_score",
-        "influence_tier",
-    ]
-
-    existing_relationship_cols = [
-        c for c in relationship_columns if c in display_relationships.columns
-    ]
+    relationship_columns = ["canonical_project_name", "company", "canonical_company", "full_name", "title", "email", "linkedin_url", "influence_score", "influence_tier"]
+    existing_relationship_cols = [c for c in relationship_columns if c in display_relationships.columns]
 
     if display_relationships.empty:
         st.info("No executive relationships found.")
     else:
-        st.dataframe(
-            display_relationships[existing_relationship_cols],
-            use_container_width=True,
-            height=650,
-        )
+        st.dataframe(display_relationships[existing_relationship_cols], use_container_width=True, height=650)
 
 
 with analytics_tab:
@@ -1470,102 +1263,48 @@ with analytics_tab:
 
     with a1:
         st.markdown("### Capture Stage Distribution")
-
         if not filtered_df.empty and "capture_stage" in filtered_df.columns:
             stage_chart = filtered_df["capture_stage"].value_counts().reset_index()
             stage_chart.columns = ["Capture Stage", "Count"]
-
-            fig = px.bar(
-                stage_chart,
-                x="Capture Stage",
-                y="Count",
-                template="plotly_dark",
-                color="Capture Stage",
-            )
-
-            fig.update_layout(
-                height=360,
-                margin=dict(l=20, r=20, t=20, b=20),
-                showlegend=False,
-            )
-
+            fig = px.bar(stage_chart, x="Capture Stage", y="Count", template="plotly_dark", color="Capture Stage")
+            fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
     with a2:
         st.markdown("### Relationship Recovery Coverage")
-
-        if not filtered_df.empty and "relationship_count" in filtered_df.columns:
-            coverage_df = filtered_df.copy()
-
+        if not st.session_state.gap_report_df.empty:
+            coverage_df = st.session_state.gap_report_df.copy()
             coverage_df["coverage_bucket"] = pd.cut(
                 coverage_df["relationship_count"],
                 bins=[-1, 0, 2, 7, 10000],
                 labels=["Zero", "Limited", "Moderate", "Strong"],
             )
-
             coverage_chart = coverage_df["coverage_bucket"].value_counts().reset_index()
             coverage_chart.columns = ["Coverage", "Projects"]
-
-            fig = px.bar(
-                coverage_chart,
-                x="Coverage",
-                y="Projects",
-                template="plotly_dark",
-                color="Coverage",
-            )
-
-            fig.update_layout(
-                height=360,
-                margin=dict(l=20, r=20, t=20, b=20),
-                showlegend=False,
-            )
-
+            fig = px.bar(coverage_chart, x="Coverage", y="Projects", template="plotly_dark", color="Coverage")
+            fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run the full gap report from Exports to populate relationship recovery analytics.")
 
     b1, b2 = st.columns(2)
 
     with b1:
         st.markdown("### Signals Over Time")
-
         if not filtered_df.empty and "created_at" in filtered_df.columns:
             trend_df = filtered_df.dropna(subset=["created_at"]).copy()
-
             if not trend_df.empty:
                 trend_df["date"] = trend_df["created_at"].dt.date
                 trend_chart = trend_df.groupby("date").size().reset_index(name="Signals")
-
-                fig = px.line(
-                    trend_chart,
-                    x="date",
-                    y="Signals",
-                    template="plotly_dark",
-                    markers=True,
-                )
-
-                fig.update_layout(
-                    height=360,
-                    margin=dict(l=20, r=20, t=20, b=20),
-                )
-
+                fig = px.line(trend_chart, x="date", y="Signals", template="plotly_dark", markers=True)
+                fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20))
                 st.plotly_chart(fig, use_container_width=True)
 
     with b2:
         st.markdown("### Relationship Influence Leaders")
-
         if not relationships_df.empty and "influence_score" in relationships_df.columns:
-            leader_cols = [
-                "full_name",
-                "title",
-                "company",
-                "canonical_company",
-                "influence_score",
-                "influence_tier",
-            ]
-
-            available_leader_cols = [
-                c for c in leader_cols if c in relationships_df.columns
-            ]
-
+            leader_cols = ["full_name", "title", "company", "canonical_company", "influence_score", "influence_tier"]
+            available_leader_cols = [c for c in leader_cols if c in relationships_df.columns]
             st.dataframe(
                 relationships_df[available_leader_cols]
                 .sort_values("influence_score", ascending=False)
@@ -1577,6 +1316,11 @@ with analytics_tab:
 
 with exports_tab:
     st.markdown("## Export Intelligence")
+
+    if st.button("Run Full Relationship Recovery Gap Report", key="run_gap_report"):
+        with st.spinner("Running full recovery pass across all projects..."):
+            st.session_state.gap_report_df = build_gap_report(projects_df, relationships_df)
+        st.success("Gap report generated.")
 
     if not filtered_df.empty:
         st.download_button(
@@ -1596,10 +1340,10 @@ with exports_tab:
             key="download_relationship_csv",
         )
 
-    if not relationship_counts_df.empty:
+    if not st.session_state.gap_report_df.empty:
         st.download_button(
             "Download Relationship Recovery Gap Report",
-            relationship_counts_df.to_csv(index=False),
+            st.session_state.gap_report_df.to_csv(index=False),
             "relationship_recovery_gap_report.csv",
             "text/csv",
             key="download_relationship_gap_report",
