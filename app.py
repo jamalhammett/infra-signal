@@ -82,33 +82,33 @@ def canonical_company(value):
     text = normalize_text(value)
 
     aliases = {
-        "vantage": ["vantage", "vantage data centers", "vantage dc"],
-        "qts": ["qts", "qts data centers", "quality technology services", "qtsdatacenters"],
-        "stack": ["stack", "stack infrastructure", "stackinfra"],
-        "digital realty": ["digital realty", "digitalrealty", "digital realty trust"],
-        "equinix": ["equinix"],
-        "cyrusone": ["cyrusone", "cyrus one"],
-        "aligned": ["aligned", "aligned data centers", "aligneddc"],
-        "coresite": ["coresite", "core site"],
-        "cologix": ["cologix"],
-        "dominion energy": ["dominion", "dominion energy", "dominionenergy", "dom"],
-        "novec": ["novec", "northern virginia electric cooperative"],
-        "dpr construction": ["dpr", "dpr construction"],
-        "turner construction": ["turner", "turner construction"],
-        "hitt": ["hitt", "hitt contracting"],
-        "clayco": ["clayco"],
-        "whiting turner": ["whiting turner", "whiting-turner"],
-        "burns mcdonnell": ["burns mcdonnell", "burns and mcdonnell"],
-        "jacobs": ["jacobs"],
-        "hdr": ["hdr"],
-        "black veatch": ["black veatch", "black and veatch"],
-        "zayo": ["zayo"],
-        "lumen": ["lumen", "lumen technologies"],
-        "crown castle": ["crown castle"],
-        "compass datacenters": ["compass", "compass datacenters", "compass data centers"],
-        "ntt global data centers": ["ntt", "ntt global data centers"],
-        "edgecore": ["edgecore", "edgecore digital infrastructure"],
-        "databank": ["databank", "data bank"],
+        "Vantage": ["vantage", "vantage data centers", "vantage dc"],
+        "QTS": ["qts", "qts data centers", "quality technology services", "qtsdatacenters"],
+        "STACK Infrastructure": ["stack", "stack infrastructure", "stackinfra"],
+        "Digital Realty": ["digital realty", "digitalrealty", "digital realty trust"],
+        "Equinix": ["equinix"],
+        "CyrusOne": ["cyrusone", "cyrus one"],
+        "Aligned Data Centers": ["aligned", "aligned data centers", "aligneddc"],
+        "CoreSite": ["coresite", "core site"],
+        "Cologix": ["cologix"],
+        "Dominion Energy": ["dominion", "dominion energy", "dominionenergy", "dom"],
+        "NOVEC": ["novec", "northern virginia electric cooperative"],
+        "DPR Construction": ["dpr", "dpr construction"],
+        "Turner Construction": ["turner", "turner construction"],
+        "HITT": ["hitt", "hitt contracting"],
+        "Clayco": ["clayco"],
+        "Whiting-Turner": ["whiting turner", "whiting-turner"],
+        "Burns & McDonnell": ["burns mcdonnell", "burns and mcdonnell"],
+        "Jacobs": ["jacobs"],
+        "HDR": ["hdr"],
+        "Black & Veatch": ["black veatch", "black and veatch"],
+        "Zayo": ["zayo"],
+        "Lumen": ["lumen", "lumen technologies"],
+        "Crown Castle": ["crown castle"],
+        "Compass Datacenters": ["compass", "compass datacenters", "compass data centers"],
+        "NTT Global Data Centers": ["ntt", "ntt global data centers"],
+        "EdgeCore": ["edgecore", "edgecore digital infrastructure"],
+        "DataBank": ["databank", "data bank"],
     }
 
     for canonical, keys in aliases.items():
@@ -116,7 +116,7 @@ def canonical_company(value):
             if key in text:
                 return canonical
 
-    return text
+    return clean_value(value, "Unknown")
 
 
 def extract_project_companies(row):
@@ -147,19 +147,34 @@ def extract_project_companies(row):
     combined = " ".join([normalize_text(row.get(field)) for field in candidate_fields if field in row.index])
 
     known_companies = [
-        "vantage", "qts", "stack", "digital realty", "equinix", "cyrusone",
-        "aligned", "coresite", "cologix", "dominion energy", "novec",
-        "dpr construction", "turner construction", "hitt", "clayco",
-        "whiting turner", "burns mcdonnell", "jacobs", "hdr", "black veatch",
-        "zayo", "lumen", "crown castle", "compass datacenters",
-        "ntt global data centers", "edgecore", "databank",
+        "Vantage", "QTS", "STACK Infrastructure", "Digital Realty", "Equinix", "CyrusOne",
+        "Aligned Data Centers", "CoreSite", "Cologix", "Dominion Energy", "NOVEC",
+        "DPR Construction", "Turner Construction", "HITT", "Clayco", "Whiting-Turner",
+        "Burns & McDonnell", "Jacobs", "HDR", "Black & Veatch", "Zayo", "Lumen",
+        "Crown Castle", "Compass Datacenters", "NTT Global Data Centers", "EdgeCore", "DataBank",
     ]
 
     for company in known_companies:
-        if canonical_company(company) in canonical_company(combined) or company in combined:
-            detected.add(canonical_company(company))
+        low_company = normalize_text(company)
+        if low_company in combined:
+            detected.add(company)
 
-    return {x for x in detected if x and x != "n a"}
+    detected = {x for x in detected if x and x != "N/A" and x != "Unknown"}
+    return detected
+
+
+def primary_account(row):
+    companies = list(extract_project_companies(row))
+    if companies:
+        priority = [
+            "Vantage", "QTS", "STACK Infrastructure", "Digital Realty", "Equinix", "CyrusOne",
+            "Aligned Data Centers", "CoreSite", "Cologix", "Dominion Energy", "NOVEC",
+        ]
+        for item in priority:
+            if item in companies:
+                return item
+        return companies[0]
+    return "Unknown Account"
 
 
 def capture_stage(score):
@@ -201,7 +216,6 @@ def signal_radius(score, mw, relationships):
 def influence_score(title):
     title = str(title or "").lower()
     score = 0
-
     if "chief" in title or "ceo" in title or "president" in title:
         score += 40
     if "vice president" in title or "vp" in title:
@@ -224,7 +238,6 @@ def influence_score(title):
         score += 25
     if "sales" in title or "business development" in title:
         score += 15
-
     return score
 
 
@@ -352,10 +365,8 @@ def authenticate(email, password):
 def reset_password(email, reset_key, new_password):
     if reset_key != PASSWORD_RESET_KEY:
         return False, "Invalid reset key."
-
     if len(new_password) < 10:
         return False, "Password must be at least 10 characters."
-
     run_execute(
         """
         update users
@@ -364,7 +375,6 @@ def reset_password(email, reset_key, new_password):
         """,
         (new_password, email.strip()),
     )
-
     return True, "Password updated successfully."
 
 
@@ -602,6 +612,59 @@ def build_gap_report(projects_df, relationships_df):
     return pd.DataFrame(rows)
 
 
+def build_account_profiles(projects_df, relationships_df):
+    if projects_df.empty:
+        return pd.DataFrame()
+
+    df = projects_df.copy().head(1500)
+    df["account_name"] = df.apply(primary_account, axis=1)
+    df["estimated_power_mw"] = pd.to_numeric(df.get("estimated_power_mw", 0), errors="coerce").fillna(0)
+    df["early_capture_score"] = pd.to_numeric(df.get("early_capture_score", 0), errors="coerce").fillna(0)
+
+    profiles = (
+        df.groupby("account_name")
+        .agg(
+            total_projects=("canonical_project_name", "count"),
+            avg_capture_score=("early_capture_score", "mean"),
+            max_capture_score=("early_capture_score", "max"),
+            total_mw=("estimated_power_mw", "sum"),
+            prime_projects=("capture_stage", lambda x: (x == "Prime Positioning").sum()),
+            strategic_projects=("capture_stage", lambda x: (x == "Strategic Development").sum()),
+        )
+        .reset_index()
+    )
+
+    if not relationships_df.empty and "canonical_company" in relationships_df.columns:
+        rel_counts = (
+            relationships_df.groupby("canonical_company")
+            .size()
+            .reset_index(name="relationship_inventory")
+            .rename(columns={"canonical_company": "account_name"})
+        )
+        profiles = profiles.merge(rel_counts, on="account_name", how="left")
+    else:
+        profiles["relationship_inventory"] = 0
+
+    profiles["relationship_inventory"] = pd.to_numeric(profiles["relationship_inventory"], errors="coerce").fillna(0).astype(int)
+    profiles["total_mw"] = profiles["total_mw"].fillna(0)
+    profiles["avg_capture_score"] = profiles["avg_capture_score"].round(1)
+    profiles["relationship_coverage_ratio"] = (profiles["relationship_inventory"] / profiles["total_projects"]).round(2)
+
+    profiles["account_risk"] = profiles.apply(
+        lambda r: "Critical" if r["max_capture_score"] >= 90 and r["relationship_coverage_ratio"] < 3
+        else "Elevated" if r["max_capture_score"] >= 75 and r["relationship_coverage_ratio"] < 5
+        else "Monitor",
+        axis=1,
+    )
+
+    profiles["account_priority"] = profiles.apply(
+        lambda r: (r["max_capture_score"] * 2) + (r["total_projects"] * 3) + (min(r["total_mw"], 1000) / 10) - min(r["relationship_inventory"], 50),
+        axis=1,
+    )
+
+    return profiles.sort_values("account_priority", ascending=False)
+
+
 login_gate()
 
 projects_df = load_projects()
@@ -615,6 +678,9 @@ if "selected_project" not in st.session_state:
         st.session_state.selected_project = projects_df.iloc[0]["canonical_project_name"]
     else:
         st.session_state.selected_project = None
+
+if "selected_account" not in st.session_state:
+    st.session_state.selected_account = None
 
 if "ribbon_message" not in st.session_state:
     st.session_state.ribbon_message = ""
@@ -765,7 +831,7 @@ st.markdown(
 )
 
 st.title("Infrastructure Intelligence Operating System")
-st.caption("Allen Hammett AI — Executive Infrastructure Intelligence + Relationship Recovery + Capture Operations")
+st.caption("Allen Hammett AI — Executive Infrastructure Intelligence + Revenue Account Intelligence + Capture Operations")
 
 ribbon_df = build_ribbon_df(filtered_df, relationships_df)
 
@@ -857,12 +923,13 @@ if st.session_state.ribbon_message:
     st.success(st.session_state.ribbon_message)
 
 
-main_tab, operations_tab, deal_tab, relationships_tab, analytics_tab, exports_tab = st.tabs(
+main_tab, operations_tab, deal_tab, relationships_tab, accounts_tab, analytics_tab, exports_tab = st.tabs(
     [
         "Command Wall",
         "Opportunity Operations",
         "Deal Control",
         "Relationship Command",
+        "Account Intelligence",
         "Market Analytics",
         "Exports",
     ]
@@ -1256,6 +1323,106 @@ with relationships_tab:
         st.dataframe(display_relationships[existing_relationship_cols], use_container_width=True, height=650)
 
 
+with accounts_tab:
+    st.markdown("## Strategic Account Intelligence")
+
+    account_profiles = build_account_profiles(filtered_df, relationships_df)
+
+    if account_profiles.empty:
+        st.info("No account intelligence available.")
+    else:
+        top_accounts = account_profiles.head(20)
+
+        a1, a2, a3, a4, a5 = st.columns(5)
+        a1.metric("Strategic Accounts", len(account_profiles))
+        a2.metric("Tracked Projects", int(account_profiles["total_projects"].sum()))
+        a3.metric("Known Relationships", int(account_profiles["relationship_inventory"].sum()))
+        a4.metric("Prime Projects", int(account_profiles["prime_projects"].sum()))
+        a5.metric("Total MW", int(account_profiles["total_mw"].sum()))
+
+        st.markdown("### Account Priority Board")
+        st.dataframe(
+            top_accounts[
+                [
+                    "account_name",
+                    "total_projects",
+                    "total_mw",
+                    "avg_capture_score",
+                    "max_capture_score",
+                    "prime_projects",
+                    "strategic_projects",
+                    "relationship_inventory",
+                    "relationship_coverage_ratio",
+                    "account_risk",
+                ]
+            ],
+            use_container_width=True,
+            height=420,
+        )
+
+        selected_account = st.selectbox(
+            "Select Strategic Account",
+            top_accounts["account_name"].tolist(),
+            index=0,
+            key="selected_account_select",
+        )
+
+        st.session_state.selected_account = selected_account
+
+        selected_profile = account_profiles[account_profiles["account_name"] == selected_account].iloc[0]
+
+        st.markdown(f"## {selected_account} Account Control")
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Projects", int(selected_profile["total_projects"]))
+        c2.metric("Total MW", int(selected_profile["total_mw"]))
+        c3.metric("Max Score", int(selected_profile["max_capture_score"]))
+        c4.metric("Relationships", int(selected_profile["relationship_inventory"]))
+        c5.metric("Risk", selected_profile["account_risk"])
+
+        if selected_profile["account_risk"] == "Critical":
+            st.error("Account risk is critical: high-value opportunity concentration with insufficient relationship coverage.")
+        elif selected_profile["account_risk"] == "Elevated":
+            st.warning("Account requires BD attention: relationship penetration is below preferred strategic coverage.")
+        else:
+            st.success("Account is in monitoring posture.")
+
+        account_project_df = filtered_df.copy()
+        if not account_project_df.empty:
+            account_project_df["account_name"] = account_project_df.apply(primary_account, axis=1)
+            account_project_df = account_project_df[account_project_df["account_name"] == selected_account]
+
+            st.markdown("### Account Project Portfolio")
+            account_cols = [
+                "canonical_project_name",
+                "capture_stage",
+                "early_capture_score",
+                "estimated_power_mw",
+                "infrastructure_type",
+                "project_stage",
+                "county",
+                "market_cluster",
+            ]
+            available_account_cols = [c for c in account_cols if c in account_project_df.columns]
+            st.dataframe(account_project_df[available_account_cols].head(50), use_container_width=True, height=360)
+
+        account_relationships = pd.DataFrame()
+        if not relationships_df.empty and "canonical_company" in relationships_df.columns:
+            account_relationships = relationships_df[relationships_df["canonical_company"] == selected_account].copy()
+
+        st.markdown("### Account Relationship Inventory")
+        if account_relationships.empty:
+            st.warning("No executive relationships currently mapped to this account.")
+        else:
+            rel_cols = ["full_name", "title", "company", "email", "linkedin_url", "influence_score", "influence_tier"]
+            available_rel_cols = [c for c in rel_cols if c in account_relationships.columns]
+            st.dataframe(
+                account_relationships[available_rel_cols].sort_values("influence_score", ascending=False).head(50),
+                use_container_width=True,
+                height=360,
+            )
+
+
 with analytics_tab:
     st.markdown("## Market Analytics")
 
@@ -1271,21 +1438,14 @@ with analytics_tab:
             st.plotly_chart(fig, use_container_width=True)
 
     with a2:
-        st.markdown("### Relationship Recovery Coverage")
-        if not st.session_state.gap_report_df.empty:
-            coverage_df = st.session_state.gap_report_df.copy()
-            coverage_df["coverage_bucket"] = pd.cut(
-                coverage_df["relationship_count"],
-                bins=[-1, 0, 2, 7, 10000],
-                labels=["Zero", "Limited", "Moderate", "Strong"],
-            )
-            coverage_chart = coverage_df["coverage_bucket"].value_counts().reset_index()
-            coverage_chart.columns = ["Coverage", "Projects"]
-            fig = px.bar(coverage_chart, x="Coverage", y="Projects", template="plotly_dark", color="Coverage")
+        st.markdown("### Account Risk Distribution")
+        account_profiles = build_account_profiles(filtered_df, relationships_df)
+        if not account_profiles.empty:
+            risk_chart = account_profiles["account_risk"].value_counts().reset_index()
+            risk_chart.columns = ["Risk", "Accounts"]
+            fig = px.bar(risk_chart, x="Risk", y="Accounts", template="plotly_dark", color="Risk")
             fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Run the full gap report from Exports to populate relationship recovery analytics.")
 
     b1, b2 = st.columns(2)
 
@@ -1322,6 +1482,8 @@ with exports_tab:
             st.session_state.gap_report_df = build_gap_report(projects_df, relationships_df)
         st.success("Gap report generated.")
 
+    account_profiles_export = build_account_profiles(filtered_df, relationships_df)
+
     if not filtered_df.empty:
         st.download_button(
             "Download Infrastructure Intelligence CSV",
@@ -1338,6 +1500,15 @@ with exports_tab:
             "executive_relationship_pipeline.csv",
             "text/csv",
             key="download_relationship_csv",
+        )
+
+    if not account_profiles_export.empty:
+        st.download_button(
+            "Download Strategic Account Intelligence CSV",
+            account_profiles_export.to_csv(index=False),
+            "strategic_account_intelligence.csv",
+            "text/csv",
+            key="download_account_intelligence_csv",
         )
 
     if not st.session_state.gap_report_df.empty:
