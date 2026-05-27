@@ -1,5 +1,6 @@
 # app.py
-# Phase 10D — Relationship Mapping Truth Layer
+# Phase 11A — Contractor Ecosystem Intelligence Engine
+# Allen Hammett AI — Infrastructure + Relationship + DEWALT Capture Intelligence
 
 import os
 import re
@@ -20,7 +21,10 @@ st.set_page_config(
 )
 
 DATABASE_URL = st.secrets.get("DATABASE_URL", os.getenv("DATABASE_URL"))
-PASSWORD_RESET_KEY = st.secrets.get("PASSWORD_RESET_KEY", os.getenv("PASSWORD_RESET_KEY", "AH_RESET_2026"))
+PASSWORD_RESET_KEY = st.secrets.get(
+    "PASSWORD_RESET_KEY",
+    os.getenv("PASSWORD_RESET_KEY", "AH_RESET_2026"),
+)
 
 
 def run_query(sql, params=None):
@@ -66,14 +70,6 @@ def safe_number(value, default=0):
         return default
 
 
-def clean_bool(value):
-    if value in [True, "true", "True", "TRUE", 1, "1"]:
-        return "Yes"
-    if value in [False, "false", "False", "FALSE", 0, "0"]:
-        return "No"
-    return "Unknown"
-
-
 def normalize_text(value):
     text = clean_value(value, "").lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
@@ -101,6 +97,21 @@ def canonical_company(value):
         "HITT": ["hitt", "hitt contracting"],
         "Clayco": ["clayco"],
         "Whiting-Turner": ["whiting turner", "whiting-turner"],
+        "Holder Construction": ["holder", "holder construction"],
+        "JE Dunn": ["je dunn", "j e dunn"],
+        "Fortis Construction": ["fortis", "fortis construction"],
+        "Rosendin": ["rosendin"],
+        "M.C. Dean": ["m c dean", "mc dean", "m.c. dean"],
+        "Dynaelectric": ["dynaelectric"],
+        "Cupertino Electric": ["cupertino electric"],
+        "Faith Technologies": ["faith technologies"],
+        "The Bell Company": ["bell company", "the bell company"],
+        "Graybar": ["graybar"],
+        "Wesco": ["wesco"],
+        "White Cap": ["white cap"],
+        "Fastenal": ["fastenal"],
+        "Grainger": ["grainger"],
+        "HD Supply": ["hd supply"],
         "Burns & McDonnell": ["burns mcdonnell", "burns and mcdonnell"],
         "Jacobs": ["jacobs"],
         "HDR": ["hdr"],
@@ -143,22 +154,8 @@ def extract_project_companies(row):
             value = normalize_text(row.get(field))
             if value:
                 company = canonical_company(value)
-                if company and company not in ["N/A", "Unknown"]:
+                if company not in ["N/A", "Unknown", ""]:
                     detected.add(company)
-
-    combined = " ".join([normalize_text(row.get(field)) for field in candidate_fields if field in row.index])
-
-    known_companies = [
-        "Aligned Data Centers", "Vantage", "QTS", "STACK Infrastructure", "Digital Realty",
-        "Equinix", "CyrusOne", "CoreSite", "Cologix", "Dominion Energy", "NOVEC",
-        "DPR Construction", "Turner Construction", "HITT", "Clayco", "Whiting-Turner",
-        "Burns & McDonnell", "Jacobs", "HDR", "Black & Veatch", "Compass Datacenters",
-        "NTT Global Data Centers", "EdgeCore", "DataBank",
-    ]
-
-    for company in known_companies:
-        if normalize_text(company) in combined:
-            detected.add(company)
 
     return detected
 
@@ -167,8 +164,17 @@ def primary_account(row):
     companies = list(extract_project_companies(row))
     if companies:
         priority = [
-            "Aligned Data Centers", "Vantage", "QTS", "STACK Infrastructure", "Digital Realty",
-            "Equinix", "CyrusOne", "CoreSite", "Cologix", "Dominion Energy", "NOVEC",
+            "Aligned Data Centers",
+            "Vantage",
+            "QTS",
+            "STACK Infrastructure",
+            "Digital Realty",
+            "Equinix",
+            "CyrusOne",
+            "CoreSite",
+            "Cologix",
+            "Dominion Energy",
+            "NOVEC",
         ]
         for item in priority:
             if item in companies:
@@ -181,25 +187,25 @@ def classify_relationship_role(title, company=""):
     title_text = normalize_text(title)
     company_text = normalize_text(company)
 
-    if any(x in company_text for x in ["dominion", "novec", "duke", "apco", "utility", "electric"]):
+    if any(x in company_text for x in ["dominion", "novec", "utility", "electric"]):
         return "Utility"
-    if any(x in company_text for x in ["dpr", "turner", "hitt", "clayco", "whiting"]):
+    if any(x in company_text for x in ["dpr", "turner", "hitt", "clayco", "whiting", "holder", "fortis"]):
         return "Construction"
-    if any(x in company_text for x in ["burns", "jacobs", "hdr", "veatch", "engineering"]):
-        return "Engineering"
-    if any(x in title_text for x in ["utility", "power", "transmission", "electric", "large load", "distribution"]):
+    if any(x in company_text for x in ["rosendin", "dean", "dynaelectric", "cupertino", "faith"]):
+        return "Electrical / MEP"
+    if any(x in title_text for x in ["utility", "power", "transmission", "electric"]):
         return "Utility"
-    if any(x in title_text for x in ["construction", "preconstruction", "project construction", "mission critical", "mep"]):
+    if any(x in title_text for x in ["construction", "preconstruction", "mission critical", "superintendent"]):
         return "Construction"
     if any(x in title_text for x in ["engineer", "engineering", "design", "technical"]):
         return "Engineering"
-    if any(x in title_text for x in ["procurement", "sourcing", "vendor", "supply", "logistics"]):
+    if any(x in title_text for x in ["procurement", "sourcing", "vendor", "supply"]):
         return "Procurement"
-    if any(x in title_text for x in ["operations", "facilities", "facility", "data center manager", "critical infrastructure"]):
+    if any(x in title_text for x in ["operations", "facilities", "facility", "data center manager"]):
         return "Operations"
-    if any(x in title_text for x in ["development", "site acquisition", "real estate", "portfolio", "business development", "strategic accounts"]):
+    if any(x in title_text for x in ["development", "site acquisition", "real estate", "strategic accounts"]):
         return "Owner / Developer"
-    if any(x in title_text for x in ["county", "planning", "zoning", "economic development", "public sector", "government"]):
+    if any(x in title_text for x in ["county", "planning", "zoning", "public sector", "government"]):
         return "Government"
     return "General Executive"
 
@@ -224,9 +230,8 @@ def build_coverage_summary(relationships):
     df = relationships.copy()
 
     if "relationship_role" not in df.columns:
-        company_col = "company" if "company" in df.columns else "company_name" if "company_name" in df.columns else None
         df["relationship_role"] = df.apply(
-            lambda r: classify_relationship_role(r.get("title", ""), r.get(company_col, "") if company_col else ""),
+            lambda r: classify_relationship_role(r.get("title", ""), r.get("company", "")),
             axis=1,
         )
 
@@ -276,10 +281,7 @@ def signal_color(score):
 
 
 def signal_radius(score, mw, relationships):
-    score = safe_number(score, 0)
-    mw = safe_number(mw, 0)
-    relationships = safe_number(relationships, 0)
-    radius = 900 + (score * 12) + (min(mw, 500) * 3) + (min(relationships, 25) * 80)
+    radius = 900 + (safe_number(score) * 12) + (min(safe_number(mw), 500) * 3) + (min(safe_number(relationships), 25) * 80)
     return int(radius) if radius > 0 else 1200
 
 
@@ -304,10 +306,10 @@ def influence_score(title):
         score += 20
     if "utility" in title or "power" in title or "transmission" in title:
         score += 20
+    if "superintendent" in title or "field" in title:
+        score += 25
     if "public sector" in title:
         score += 25
-    if "sales" in title or "business development" in title:
-        score += 15
     return score
 
 
@@ -321,23 +323,18 @@ def influence_tier(score):
 
 
 def threat_level(score, mw, relationship_count, coverage_score=0):
-    score = safe_number(score, 0)
-    mw = safe_number(mw, 0)
-    relationship_count = safe_number(relationship_count, 0)
-    coverage_score = safe_number(coverage_score, 0)
-
     risk = 0
-    if score >= 90:
+    if safe_number(score) >= 90:
         risk += 35
-    if mw >= 250:
+    if safe_number(mw) >= 250:
         risk += 30
-    if relationship_count <= 2:
+    if safe_number(relationship_count) <= 2:
         risk += 25
-    if coverage_score < 35:
+    if safe_number(coverage_score) < 35:
         risk += 20
-    if relationship_count >= 8:
+    if safe_number(relationship_count) >= 8:
         risk -= 10
-    if coverage_score >= 75:
+    if safe_number(coverage_score) >= 75:
         risk -= 15
 
     if risk >= 70:
@@ -348,43 +345,32 @@ def threat_level(score, mw, relationship_count, coverage_score=0):
 
 
 def deal_readiness(score, relationship_count, mw, coverage_score=0):
-    score = safe_number(score, 0)
-    relationship_count = safe_number(relationship_count, 0)
-    mw = safe_number(mw, 0)
-    coverage_score = safe_number(coverage_score, 0)
-
     readiness = 0
-    if score >= 75:
+    if safe_number(score) >= 75:
         readiness += 30
-    if score >= 90:
+    if safe_number(score) >= 90:
         readiness += 15
-    if relationship_count >= 3:
+    if safe_number(relationship_count) >= 3:
         readiness += 15
-    if relationship_count >= 8:
+    if safe_number(relationship_count) >= 8:
         readiness += 10
-    if coverage_score >= 45:
+    if safe_number(coverage_score) >= 45:
         readiness += 15
-    if coverage_score >= 75:
+    if safe_number(coverage_score) >= 75:
         readiness += 15
-    if mw >= 250:
+    if safe_number(mw) >= 250:
         readiness += 10
-
     return min(readiness, 100)
 
 
 def opportunity_status(score, mw, relationship_count, coverage_score=0):
-    score = safe_number(score, 0)
-    mw = safe_number(mw, 0)
-    relationship_count = safe_number(relationship_count, 0)
-    coverage_score = safe_number(coverage_score, 0)
-
-    if score >= 90 and (relationship_count <= 2 or coverage_score < 35):
+    if safe_number(score) >= 90 and (safe_number(relationship_count) <= 2 or safe_number(coverage_score) < 35):
         return "CRITICAL", "#ff4b4b"
-    if score >= 90:
+    if safe_number(score) >= 90:
         return "PRIME", "#00ffaa"
-    if mw >= 250 and (relationship_count <= 3 or coverage_score < 45):
+    if safe_number(mw) >= 250 and (safe_number(relationship_count) <= 3 or safe_number(coverage_score) < 45):
         return "POWER RISK", "#ffb000"
-    if score >= 75:
+    if safe_number(score) >= 75:
         return "STRATEGIC", "#008cff"
     return "MONITOR", "#8a8f98"
 
@@ -392,41 +378,28 @@ def opportunity_status(score, mw, relationship_count, coverage_score=0):
 def recommended_actions(row, relationships_count, coverage_score=0, missing_roles=""):
     actions = []
     score = safe_number(row.get("early_capture_score"), 0)
-    infrastructure_type = str(row.get("infrastructure_type") or "").lower()
-    utility_dependency = clean_value(row.get("utility_dependency"), "")
-    project_stage = str(row.get("project_stage") or "").lower()
-    estimated_mw = clean_value(row.get("estimated_power_mw"), "")
+    infrastructure_type = normalize_text(row.get("infrastructure_type"))
+    project_stage = normalize_text(row.get("project_stage"))
 
     if score >= 90 and relationships_count <= 2:
-        actions.append("Urgent: expand executive relationship coverage immediately.")
+        actions.append("Urgent: expand executive and field relationship coverage immediately.")
     elif score >= 90:
-        actions.append("Escalate to immediate BD positioning review.")
+        actions.append("Escalate national account / field sales positioning.")
     elif score >= 75:
-        actions.append("Track as strategic development opportunity.")
+        actions.append("Track as strategic contractor ecosystem opportunity.")
 
     if coverage_score < 45:
-        actions.append(f"Coverage gap: fill missing stakeholder lanes — {missing_roles}.")
+        actions.append(f"Coverage gap: fill missing lanes — {missing_roles}.")
     elif coverage_score < 75:
         actions.append(f"Improve capture readiness by strengthening missing lanes — {missing_roles}.")
     else:
         actions.append("Relationship coverage is strong enough for active capture coordination.")
 
     if "data center" in infrastructure_type:
-        actions.append("Assess hyperscale ecosystem: utility, fiber, security, compliance, and construction stakeholders.")
-
-    if utility_dependency not in ["", "N/A", "Unknown"]:
-        actions.append(f"Map utility relationship path connected to {utility_dependency}.")
-
-    if estimated_mw not in ["", "N/A", "Unknown"]:
-        actions.append("Evaluate power availability, transmission risk, and substation proximity.")
-
-    if relationships_count > 0:
-        actions.append("Prioritize outreach to highest-influence matched executive contacts.")
-    else:
-        actions.append("Relationship gap detected: identify owner, operator, utility, and construction stakeholders.")
+        actions.append("Prioritize DEWALT / Stanley Black & Decker contractor penetration strategy.")
 
     if "review" in project_stage or "submitted" in project_stage:
-        actions.append("Monitor permit approval timeline and county planning updates.")
+        actions.append("Procurement window is approaching: monitor GC/MEP award and mobilization signals.")
 
     return actions
 
@@ -523,7 +496,7 @@ def load_projects():
     df["capture_stage"] = df["early_capture_score"].apply(capture_stage)
 
     if "estimated_power_mw" in df.columns:
-        df["estimated_power_mw"] = pd.to_numeric(df["estimated_power_mw"], errors="coerce")
+        df["estimated_power_mw"] = pd.to_numeric(df["estimated_power_mw"], errors="coerce").fillna(0)
     else:
         df["estimated_power_mw"] = 0
 
@@ -560,12 +533,8 @@ def load_relationships():
                 df["canonical_company"] = "Unknown"
 
         if "relationship_role" not in df.columns:
-            company_col = "company" if "company" in df.columns else None
             df["relationship_role"] = df.apply(
-                lambda r: classify_relationship_role(
-                    r.get("title", ""),
-                    r.get(company_col, "") if company_col else "",
-                ),
+                lambda r: classify_relationship_role(r.get("title", ""), r.get("company", "")),
                 axis=1,
             )
 
@@ -621,15 +590,13 @@ def recover_relationships_for_project(project_row, relationships_df):
                 rel_df.at[idx, "match_strength"] = 80
                 rel_df.at[idx, "match_type"] = "Company Text Match"
 
-    utility_terms = ["dominion", "novec", "electric", "utility", "power", "transmission"]
-    if any(term in project_text for term in utility_terms):
+    if any(term in project_text for term in ["dominion", "novec", "electric", "utility", "power", "transmission"]):
         utility_mask = rel_df["relationship_role"].astype(str).str.lower().str.contains("utility|power|transmission", na=False)
         rel_df.loc[utility_mask & (rel_df["match_strength"] < 70), "match_strength"] = 70
         rel_df.loc[utility_mask & (rel_df["match_type"] == "Unmapped"), "match_type"] = "Utility Path Match"
 
-    contractor_terms = ["construction", "mission critical", "dpr", "turner", "hitt", "clayco"]
-    if any(term in project_text for term in contractor_terms):
-        contractor_mask = rel_df["relationship_role"].astype(str).str.lower().str.contains("construction|engineering|operations", na=False)
+    if any(term in project_text for term in ["construction", "mission critical", "dpr", "turner", "hitt", "clayco"]):
+        contractor_mask = rel_df["relationship_role"].astype(str).str.lower().str.contains("construction|engineering|operations|mep|electrical", na=False)
         rel_df.loc[contractor_mask & (rel_df["match_strength"] < 60), "match_strength"] = 60
         rel_df.loc[contractor_mask & (rel_df["match_type"] == "Unmapped"), "match_type"] = "Contractor / Delivery Path Match"
 
@@ -646,194 +613,10 @@ def recover_relationships_for_project(project_row, relationships_df):
         ascending=False,
     )
 
-    best_match = recovered.iloc[0]["match_type"]
-    return recovered, f"Relationship path identified: {best_match}"
+    return recovered, f"Relationship path identified: {recovered.iloc[0]['match_type']}"
 
 
 def relationship_path_status(project_row, relationships_df):
-CONTRACTOR_ECOSYSTEM = {
-    "DPR Construction": {
-        "type": "Prime GC",
-        "strength": 95,
-        "preferred_brands": ["DEWALT", "Milwaukee", "Hilti"],
-        "distributors": ["White Cap", "Fastenal", "Grainger"],
-    },
-    "Turner Construction": {
-        "type": "Prime GC",
-        "strength": 94,
-        "preferred_brands": ["DEWALT", "Milwaukee"],
-        "distributors": ["White Cap", "HD Supply", "Grainger"],
-    },
-    "HITT": {
-        "type": "Prime GC",
-        "strength": 88,
-        "preferred_brands": ["DEWALT", "Milwaukee"],
-        "distributors": ["White Cap", "Fastenal"],
-    },
-    "Clayco": {
-        "type": "Prime GC",
-        "strength": 86,
-        "preferred_brands": ["DEWALT"],
-        "distributors": ["White Cap", "Grainger"],
-    },
-    "Whiting-Turner": {
-        "type": "Prime GC",
-        "strength": 90,
-        "preferred_brands": ["Milwaukee", "DEWALT"],
-        "distributors": ["Fastenal", "Grainger"],
-    },
-    "Rosendin": {
-        "type": "MEP / Electrical",
-        "strength": 91,
-        "preferred_brands": ["DEWALT", "Milwaukee"],
-        "distributors": ["Graybar", "Wesco"],
-    },
-    "M.C. Dean": {
-        "type": "Mission Critical Electrical",
-        "strength": 98,
-        "preferred_brands": ["DEWALT", "Hilti"],
-        "distributors": ["Graybar", "Border States"],
-    },
-    "Dynaelectric": {
-        "type": "Electrical Contractor",
-        "strength": 82,
-        "preferred_brands": ["DEWALT"],
-        "distributors": ["Graybar"],
-    },
-    "Cupertino Electric": {
-        "type": "Mission Critical Electrical",
-        "strength": 93,
-        "preferred_brands": ["Milwaukee", "DEWALT"],
-        "distributors": ["Wesco", "Graybar"],
-    },
-}
-
-
-def detect_contractor_ecosystem(project_row, relationships_df):
-    project_text = normalize_text(" ".join([
-        clean_value(project_row.get("canonical_project_name"), ""),
-        clean_value(project_row.get("project_name"), ""),
-        clean_value(project_row.get("permit_description"), ""),
-        clean_value(project_row.get("raw_text"), ""),
-        clean_value(project_row.get("strategic_notes"), ""),
-    ]))
-
-    detected = []
-
-    for contractor, data in CONTRACTOR_ECOSYSTEM.items():
-
-        contractor_text = normalize_text(contractor)
-
-        found = False
-
-        if contractor_text in project_text:
-            found = True
-
-        if not relationships_df.empty:
-
-            contractor_matches = relationships_df[
-                relationships_df["canonical_company"].astype(str).str.lower()
-                == contractor.lower()
-            ]
-
-            if len(contractor_matches) >= 1:
-                found = True
-
-        if found:
-            detected.append({
-                "contractor": contractor,
-                "type": data["type"],
-                "strength": data["strength"],
-                "preferred_brands": ", ".join(data["preferred_brands"]),
-                "distributors": ", ".join(data["distributors"]),
-            })
-
-    return pd.DataFrame(detected)
-
-
-def labor_intensity_estimate(project_row):
-
-    mw = safe_number(project_row.get("estimated_power_mw"), 0)
-
-    if mw >= 500:
-        return "Hyperscale Workforce"
-
-    if mw >= 250:
-        return "Heavy Mission Critical Workforce"
-
-    if mw >= 100:
-        return "Large Workforce"
-
-    if mw >= 40:
-        return "Moderate Workforce"
-
-    return "Specialized Workforce"
-
-
-def procurement_stage(project_row):
-
-    stage = normalize_text(project_row.get("project_stage"))
-
-    if any(x in stage for x in ["concept", "planning", "rezoning"]):
-        return "Pre-Procurement"
-
-    if any(x in stage for x in ["review", "submitted", "approval"]):
-        return "Contractor Positioning"
-
-    if any(x in stage for x in ["construction", "grading", "site work"]):
-        return "Field Procurement Active"
-
-    if any(x in stage for x in ["fit out", "commissioning"]):
-        return "MEP + Tool Deployment"
-
-    return "Monitoring"
-
-
-def dewalt_opportunity_score(project_row, contractor_df):
-
-    score = 0
-
-    mw = safe_number(project_row.get("estimated_power_mw"), 0)
-    capture = safe_number(project_row.get("early_capture_score"), 0)
-
-    score += min(mw / 10, 40)
-    score += min(capture / 2, 40)
-
-    if not contractor_df.empty:
-        score += 20
-
-    return int(min(score, 100))
-
-
-def likely_distributors(contractor_df):
-
-    if contractor_df.empty:
-        return "Unknown"
-
-    distributors = set()
-
-    for _, row in contractor_df.iterrows():
-
-        for d in str(row["distributors"]).split(","):
-            distributors.add(d.strip())
-
-    return ", ".join(sorted(distributors))
-
-
-def tool_demand_profile(project_row):
-
-    infrastructure = normalize_text(project_row.get("infrastructure_type"))
-    mw = safe_number(project_row.get("estimated_power_mw"), 0)
-
-    if "data center" in infrastructure:
-
-        if mw >= 250:
-            return "Hyperscale Tool Deployment"
-
-        if mw >= 100:
-            return "Heavy Mission Critical Tool Demand"
-
-    return "Standard Infrastructure Tool Demand"
     rels, source = recover_relationships_for_project(project_row, relationships_df)
 
     if rels.empty:
@@ -851,6 +634,126 @@ def tool_demand_profile(project_row):
     return "No Path Yet", 0, source
 
 
+CONTRACTOR_ECOSYSTEM = {
+    "DPR Construction": {"type": "Prime GC", "strength": 95, "preferred_brands": ["DEWALT", "Milwaukee", "Hilti"], "distributors": ["White Cap", "Fastenal", "Grainger"]},
+    "Turner Construction": {"type": "Prime GC", "strength": 94, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["White Cap", "HD Supply", "Grainger"]},
+    "HITT": {"type": "Prime GC", "strength": 88, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["White Cap", "Fastenal"]},
+    "Clayco": {"type": "Prime GC", "strength": 86, "preferred_brands": ["DEWALT"], "distributors": ["White Cap", "Grainger"]},
+    "Whiting-Turner": {"type": "Prime GC", "strength": 90, "preferred_brands": ["Milwaukee", "DEWALT"], "distributors": ["Fastenal", "Grainger"]},
+    "Holder Construction": {"type": "Prime GC", "strength": 92, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["White Cap", "Fastenal"]},
+    "JE Dunn": {"type": "Prime GC", "strength": 86, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["White Cap", "Grainger"]},
+    "Fortis Construction": {"type": "Prime GC", "strength": 89, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["White Cap", "Fastenal"]},
+    "Rosendin": {"type": "MEP / Electrical", "strength": 91, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["Graybar", "Wesco"]},
+    "M.C. Dean": {"type": "Mission Critical Electrical", "strength": 98, "preferred_brands": ["DEWALT", "Hilti"], "distributors": ["Graybar", "Border States"]},
+    "Dynaelectric": {"type": "Electrical Contractor", "strength": 82, "preferred_brands": ["DEWALT"], "distributors": ["Graybar"]},
+    "Cupertino Electric": {"type": "Mission Critical Electrical", "strength": 93, "preferred_brands": ["Milwaukee", "DEWALT"], "distributors": ["Wesco", "Graybar"]},
+    "Faith Technologies": {"type": "Electrical / Technology Contractor", "strength": 84, "preferred_brands": ["DEWALT", "Milwaukee"], "distributors": ["Graybar", "Wesco"]},
+    "The Bell Company": {"type": "Mechanical / MEP", "strength": 80, "preferred_brands": ["DEWALT"], "distributors": ["White Cap", "Grainger"]},
+}
+
+
+def detect_contractor_ecosystem(project_row, relationships_df):
+    project_text = normalize_text(" ".join([
+        clean_value(project_row.get("canonical_project_name"), ""),
+        clean_value(project_row.get("project_name"), ""),
+        clean_value(project_row.get("permit_description"), ""),
+        clean_value(project_row.get("raw_text"), ""),
+        clean_value(project_row.get("strategic_notes"), ""),
+    ]))
+
+    detected = []
+
+    for contractor, data in CONTRACTOR_ECOSYSTEM.items():
+        contractor_text = normalize_text(contractor)
+        found = contractor_text in project_text
+
+        if not relationships_df.empty and "canonical_company" in relationships_df.columns:
+            contractor_matches = relationships_df[
+                relationships_df["canonical_company"].astype(str).str.lower() == contractor.lower()
+            ]
+            if len(contractor_matches) >= 1:
+                found = True
+
+        if found:
+            detected.append({
+                "contractor": contractor,
+                "type": data["type"],
+                "strength": data["strength"],
+                "preferred_brands": ", ".join(data["preferred_brands"]),
+                "distributors": ", ".join(data["distributors"]),
+            })
+
+    return pd.DataFrame(detected)
+
+
+def labor_intensity_estimate(project_row):
+    mw = safe_number(project_row.get("estimated_power_mw"), 0)
+    if mw >= 500:
+        return "Hyperscale Workforce"
+    if mw >= 250:
+        return "Heavy Mission Critical Workforce"
+    if mw >= 100:
+        return "Large Workforce"
+    if mw >= 40:
+        return "Moderate Workforce"
+    return "Specialized Workforce"
+
+
+def procurement_stage(project_row):
+    stage = normalize_text(project_row.get("project_stage"))
+
+    if any(x in stage for x in ["concept", "planning", "rezoning"]):
+        return "Pre-Procurement"
+    if any(x in stage for x in ["review", "submitted", "approval"]):
+        return "Contractor Positioning"
+    if any(x in stage for x in ["construction", "grading", "site work"]):
+        return "Field Procurement Active"
+    if any(x in stage for x in ["fit out", "commissioning"]):
+        return "MEP + Tool Deployment"
+
+    return "Monitoring"
+
+
+def dewalt_opportunity_score(project_row, contractor_df):
+    score = 0
+    mw = safe_number(project_row.get("estimated_power_mw"), 0)
+    capture = safe_number(project_row.get("early_capture_score"), 0)
+
+    score += min(mw / 10, 40)
+    score += min(capture / 2, 40)
+
+    if not contractor_df.empty:
+        score += 20
+
+    return int(min(score, 100))
+
+
+def likely_distributors(contractor_df):
+    if contractor_df.empty:
+        return "Unknown"
+
+    distributors = set()
+
+    for _, row in contractor_df.iterrows():
+        for d in str(row["distributors"]).split(","):
+            distributors.add(d.strip())
+
+    return ", ".join(sorted(distributors))
+
+
+def tool_demand_profile(project_row):
+    infrastructure = normalize_text(project_row.get("infrastructure_type"))
+    mw = safe_number(project_row.get("estimated_power_mw"), 0)
+
+    if "data center" in infrastructure:
+        if mw >= 250:
+            return "Hyperscale Tool Deployment"
+        if mw >= 100:
+            return "Heavy Mission Critical Tool Demand"
+
+    return "Standard Infrastructure Tool Demand"
+
+
 def add_relationship_counts_for_subset(df, relationships_df):
     if df.empty:
         return df
@@ -861,7 +764,7 @@ def add_relationship_counts_for_subset(df, relationships_df):
     for _, row in working_df.iterrows():
         rels, source = recover_relationships_for_project(row, relationships_df)
         _, coverage_score, missing_roles, coverage_status = build_coverage_summary(rels)
-        path_status, path_score, path_source = relationship_path_status(row, relationships_df)
+        path_status, path_score, _ = relationship_path_status(row, relationships_df)
         coverage_score = max(coverage_score, path_score)
 
         counts.append(len(rels))
@@ -910,14 +813,7 @@ def build_ribbon_df(projects_df, relationships_df):
         axis=1,
     )
 
-    priority_order = {
-        "CRITICAL": 1,
-        "PRIME": 2,
-        "POWER RISK": 3,
-        "STRATEGIC": 4,
-        "MONITOR": 5,
-    }
-
+    priority_order = {"CRITICAL": 1, "PRIME": 2, "POWER RISK": 3, "STRATEGIC": 4, "MONITOR": 5}
     ribbon_df["priority_rank"] = ribbon_df["opportunity_status"].map(priority_order).fillna(9)
 
     return ribbon_df.sort_values(
@@ -928,23 +824,21 @@ def build_ribbon_df(projects_df, relationships_df):
 
 def build_gap_report(projects_df, relationships_df):
     rows = []
+
     for _, row in projects_df.iterrows():
-        name = clean_value(row.get("canonical_project_name"), "")
         rels, source = recover_relationships_for_project(row, relationships_df)
         _, coverage_score, missing_roles, coverage_status = build_coverage_summary(rels)
         path_status, path_score, _ = relationship_path_status(row, relationships_df)
 
-        rows.append(
-            {
-                "canonical_project_name": name,
-                "relationship_count": len(rels),
-                "coverage_score": max(coverage_score, path_score),
-                "coverage_status": coverage_status,
-                "relationship_path_status": path_status,
-                "missing_roles": missing_roles,
-                "relationship_source": source,
-            }
-        )
+        rows.append({
+            "canonical_project_name": clean_value(row.get("canonical_project_name"), ""),
+            "relationship_count": len(rels),
+            "coverage_score": max(coverage_score, path_score),
+            "coverage_status": coverage_status,
+            "relationship_path_status": path_status,
+            "missing_roles": missing_roles,
+            "relationship_source": source,
+        })
 
     return pd.DataFrame(rows)
 
@@ -1038,7 +932,6 @@ def build_executive_alert_feed(projects_df, relationships_df, account_profiles_d
             relationship_count = safe_number(row.get("relationship_count"), 0)
             coverage_score = safe_number(row.get("coverage_score"), 0)
             missing_roles = clean_value(row.get("missing_roles"), "Unknown")
-            utility_dependency = clean_value(row.get("utility_dependency"), "")
             path_status = clean_value(row.get("relationship_path_status"), "No Path Yet")
 
             if score >= score_threshold and coverage_score < 45:
@@ -1056,25 +949,16 @@ def build_executive_alert_feed(projects_df, relationships_df, account_profiles_d
                     "Alert Type": "Relationship Penetration Failure",
                     "Subject": project_name,
                     "Signal": f"Prime opportunity with only {int(relationship_count)} recovered relationships.",
-                    "Recommended Action": "Assign BD owner and expand executive contact coverage immediately.",
+                    "Recommended Action": "Assign field sales / national account owner immediately.",
                 })
 
             if mw >= mw_threshold and coverage_score < 60:
                 alerts.append({
                     "Priority": "Elevated",
-                    "Alert Type": "High MW Coverage Risk",
+                    "Alert Type": "High MW Contractor Coverage Risk",
                     "Subject": project_name,
-                    "Signal": f"{int(mw)} MW opportunity with {int(coverage_score)}% coverage.",
-                    "Recommended Action": "Prioritize utility, construction, and engineering stakeholder mapping.",
-                })
-
-            if utility_dependency not in ["", "N/A", "Unknown"] and "Utility" in missing_roles:
-                alerts.append({
-                    "Priority": "Elevated",
-                    "Alert Type": "Utility Path Missing",
-                    "Subject": project_name,
-                    "Signal": f"Utility dependency detected: {utility_dependency}.",
-                    "Recommended Action": "Map strategic accounts, transmission, and large-load contacts.",
+                    "Signal": f"{int(mw)} MW opportunity with {int(coverage_score)}% relationship coverage.",
+                    "Recommended Action": "Prioritize GC, MEP, utility, and distributor relationship mapping.",
                 })
 
     if account_profiles_df is not None and not account_profiles_df.empty:
@@ -1092,7 +976,7 @@ def build_executive_alert_feed(projects_df, relationships_df, account_profiles_d
                     "Alert Type": "Strategic Account Risk",
                     "Subject": account,
                     "Signal": f"{int(projects)} tracked projects, max score {int(max_score)}, coverage {int(coverage)}%.",
-                    "Recommended Action": f"Strengthen account coverage lanes: {missing}.",
+                    "Recommended Action": f"Strengthen account lanes: {missing}.",
                 })
 
     alert_df = pd.DataFrame(alerts)
@@ -1155,6 +1039,14 @@ if not filtered_df.empty:
             )
         ]
 
+    if alert_company_keyword:
+        filtered_df = filtered_df[
+            filtered_df.astype(str).apply(
+                lambda row: row.str.contains(alert_company_keyword, case=False, na=False).any(),
+                axis=1,
+            )
+        ]
+
     if prime_only:
         filtered_df = filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]
 
@@ -1180,28 +1072,13 @@ if not filtered_df.empty:
 st.markdown(
     """
     <style>
-    .block-container {
-        padding-top: 1.55rem;
-        padding-bottom: 2rem;
-        max-width: 1500px;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.65rem;
-        font-weight: 700;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: .82rem;
-        color: #7f8b99;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 18px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 38px;
-        font-weight: 600;
-    }
+    .block-container {padding-top: 1.55rem; padding-bottom: 2rem; max-width: 1500px;}
+    div[data-testid="stMetricValue"] {font-size: 1.65rem; font-weight: 700;}
+    div[data-testid="stMetricLabel"] {font-size: .82rem; color: #7f8b99;}
+    .stTabs [data-baseweb="tab-list"] {gap: 18px;}
+    .stTabs [data-baseweb="tab"] {height: 38px; font-weight: 600;}
     .ribbon-card {
-        height: 292px;
+        height: 312px;
         border: 1px solid #1f2a3a;
         border-top: 4px solid var(--accent);
         background: linear-gradient(145deg, #060a0f 0%, #101824 100%);
@@ -1213,39 +1090,10 @@ st.markdown(
         justify-content: space-between;
         overflow: visible;
     }
-    .ribbon-status {
-        color: var(--accent);
-        font-size: .72rem;
-        font-weight: 900;
-        letter-spacing: .08rem;
-        text-transform: uppercase;
-        margin-bottom: 9px;
-    }
-    .ribbon-title {
-        color: #f5f7fa;
-        font-size: .96rem;
-        font-weight: 850;
-        line-height: 1.18rem;
-        min-height: 42px;
-        max-height: 44px;
-        overflow: hidden;
-        margin-bottom: 10px;
-    }
-    .ribbon-meta {
-        color: #aeb8c5;
-        font-size: .76rem;
-        line-height: 1.22rem;
-    }
-    .ribbon-action {
-        color: #ffffff;
-        font-size: .76rem;
-        font-weight: 700;
-        border-top: 1px solid #243244;
-        padding-top: 10px;
-        margin-top: 12px;
-        min-height: 42px;
-        line-height: 1.15rem;
-    }
+    .ribbon-status {color: var(--accent); font-size: .72rem; font-weight: 900; letter-spacing: .08rem; text-transform: uppercase; margin-bottom: 9px;}
+    .ribbon-title {color: #f5f7fa; font-size: .96rem; font-weight: 850; line-height: 1.18rem; min-height: 42px; max-height: 44px; overflow: hidden; margin-bottom: 10px;}
+    .ribbon-meta {color: #aeb8c5; font-size: .76rem; line-height: 1.22rem;}
+    .ribbon-action {color: #ffffff; font-size: .76rem; font-weight: 700; border-top: 1px solid #243244; padding-top: 10px; margin-top: 12px; min-height: 42px; line-height: 1.15rem;}
     .active-strip {
         border: 1px solid #26384f;
         border-left: 5px solid #00a3ff;
@@ -1256,30 +1104,16 @@ st.markdown(
         margin-top: 18px;
         margin-bottom: 18px;
     }
-    .active-strip-title {
-        font-size: .78rem;
-        color: #7cc8ff;
-        font-weight: 800;
-        letter-spacing: .06rem;
-        text-transform: uppercase;
-        margin-bottom: 4px;
-    }
-    .active-strip-name {
-        font-size: 1rem;
-        font-weight: 850;
-        margin-bottom: 4px;
-    }
-    .active-strip-meta {
-        font-size: .78rem;
-        color: #b5c2d1;
-    }
+    .active-strip-title {font-size: .78rem; color: #7cc8ff; font-weight: 800; letter-spacing: .06rem; text-transform: uppercase; margin-bottom: 4px;}
+    .active-strip-name {font-size: 1rem; font-weight: 850; margin-bottom: 4px;}
+    .active-strip-meta {font-size: .78rem; color: #b5c2d1;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 st.title("Infrastructure Intelligence Operating System")
-st.caption("Allen Hammett AI — Executive Infrastructure Intelligence + Relationship Mapping Truth Layer")
+st.caption("Allen Hammett AI — DEWALT / Stanley Black & Decker Infrastructure Capture Intelligence")
 
 account_profiles_global = build_account_profiles(filtered_df, relationships_df)
 executive_alerts_df = build_executive_alert_feed(
@@ -1315,11 +1149,11 @@ else:
         if status == "CRITICAL":
             action_text = "Fill stakeholder coverage gaps now."
         elif status == "PRIME":
-            action_text = "Escalate BD positioning."
+            action_text = "Escalate DEWALT / field sales positioning."
         elif status == "POWER RISK":
             action_text = "Validate utility and power path."
         elif status == "STRATEGIC":
-            action_text = "Track capture timing."
+            action_text = "Track contractor procurement timing."
         else:
             action_text = "Maintain monitoring posture."
 
@@ -1352,7 +1186,6 @@ else:
                 st.rerun()
 
 active_project_name = st.session_state.selected_project
-
 active_df = filtered_df[
     filtered_df["canonical_project_name"].astype(str) == str(active_project_name)
 ] if not filtered_df.empty and active_project_name else pd.DataFrame()
@@ -1363,12 +1196,14 @@ if not active_df.empty:
     _, active_coverage_score, active_missing_roles, _ = build_coverage_summary(active_rels)
     active_path_status, active_path_score, _ = relationship_path_status(active_row, relationships_df)
     active_coverage_score = max(active_coverage_score, active_path_score)
+    active_contractor_df = detect_contractor_ecosystem(active_row, relationships_df)
 
     active_score = int(safe_number(active_row.get("early_capture_score"), 0))
     active_mw = safe_number(active_row.get("estimated_power_mw"), 0)
     active_relationships = len(active_rels)
     active_threat = threat_level(active_score, active_mw, active_relationships, active_coverage_score)
     active_readiness = deal_readiness(active_score, active_relationships, active_mw, active_coverage_score)
+    active_dewalt_score = dewalt_opportunity_score(active_row, active_contractor_df)
 
     st.markdown(
         f"""
@@ -1376,7 +1211,7 @@ if not active_df.empty:
             <div class="active-strip-title">Active Opportunity</div>
             <div class="active-strip-name">{active_project_name}</div>
             <div class="active-strip-meta">
-                Score {active_score} • Readiness {int(active_readiness)}% • Threat {active_threat} • Relationships {active_relationships} • Coverage {active_coverage_score}% • Path {active_path_status} • Missing {active_missing_roles} • MW {int(active_mw) if active_mw > 0 else "N/A"}
+                Score {active_score} • Readiness {int(active_readiness)}% • Threat {active_threat} • Relationships {active_relationships} • Coverage {active_coverage_score}% • Path {active_path_status} • DEWALT Score {active_dewalt_score}/100 • MW {int(active_mw) if active_mw > 0 else "N/A"}
             </div>
         </div>
         """,
@@ -1387,12 +1222,13 @@ if st.session_state.ribbon_message:
     st.success(st.session_state.ribbon_message)
 
 
-main_tab, alerts_tab, operations_tab, deal_tab, relationships_tab, accounts_tab, analytics_tab, exports_tab = st.tabs(
+main_tab, alerts_tab, operations_tab, deal_tab, contractor_tab, relationships_tab, accounts_tab, analytics_tab, exports_tab = st.tabs(
     [
         "Command Wall",
         "Executive Alerts",
         "Opportunity Operations",
         "Deal Control",
+        "Contractor Intelligence",
         "Relationship Command",
         "Account Intelligence",
         "Market Analytics",
@@ -1403,7 +1239,6 @@ main_tab, alerts_tab, operations_tab, deal_tab, relationships_tab, accounts_tab,
 
 with main_tab:
     k1, k2, k3, k4, k5, k6 = st.columns(6)
-
     k1.metric("Signals", len(filtered_df))
     k2.metric("Prime", len(filtered_df[filtered_df["capture_stage"] == "Prime Positioning"]) if not filtered_df.empty else 0)
     k3.metric("Alerts", len(executive_alerts_df))
@@ -1422,19 +1257,13 @@ with main_tab:
 
         if not map_df.empty:
             map_df = add_relationship_counts_for_subset(map_df, relationships_df)
-
             map_df["relationship_count"] = pd.to_numeric(map_df.get("relationship_count", 0), errors="coerce").fillna(0).astype(int)
             map_df["coverage_score"] = pd.to_numeric(map_df.get("coverage_score", 0), errors="coerce").fillna(0).astype(int)
             map_df["estimated_power_mw"] = pd.to_numeric(map_df.get("estimated_power_mw", 0), errors="coerce").fillna(0)
             map_df["early_capture_score"] = pd.to_numeric(map_df.get("early_capture_score", 0), errors="coerce").fillna(0)
-
             map_df["color"] = map_df["early_capture_score"].apply(signal_color)
             map_df["radius"] = map_df.apply(
-                lambda r: signal_radius(
-                    r.get("early_capture_score", 0),
-                    r.get("estimated_power_mw", 0),
-                    r.get("relationship_count", 0),
-                ),
+                lambda r: signal_radius(r.get("early_capture_score", 0), r.get("estimated_power_mw", 0), r.get("relationship_count", 0)),
                 axis=1,
             )
 
@@ -1471,11 +1300,7 @@ with main_tab:
                     Market: {market_cluster}
                 </div>
                 """,
-                "style": {
-                    "backgroundColor": "#05070A",
-                    "color": "#F5F7FA",
-                    "border": "1px solid #1E5EFF",
-                },
+                "style": {"backgroundColor": "#05070A", "color": "#F5F7FA", "border": "1px solid #1E5EFF"},
             }
 
             st.pydeck_chart(
@@ -1512,18 +1337,13 @@ with main_tab:
 
     with signal_col2:
         st.markdown("### Top Priority Queue")
-        priority_cols = ["canonical_project_name", "early_capture_score", "capture_stage"]
-        available_priority_cols = [c for c in priority_cols if c in filtered_df.columns]
-
+        cols = [c for c in ["canonical_project_name", "early_capture_score", "capture_stage"] if c in filtered_df.columns]
         if not filtered_df.empty:
-            st.dataframe(filtered_df[available_priority_cols].head(10), use_container_width=True, height=300)
-        else:
-            st.info("No priority records available.")
+            st.dataframe(filtered_df[cols].head(10), use_container_width=True, height=300)
 
 
 with alerts_tab:
     st.markdown("## Executive Alert Feed")
-
     if executive_alerts_df.empty:
         st.success("No active executive alerts under current thresholds.")
     else:
@@ -1532,31 +1352,11 @@ with alerts_tab:
         c2.metric("Critical", len(executive_alerts_df[executive_alerts_df["Priority"] == "Critical"]))
         c3.metric("Elevated", len(executive_alerts_df[executive_alerts_df["Priority"] == "Elevated"]))
 
-        alert_filter = st.selectbox(
-            "Alert Priority Filter",
-            ["All", "Critical", "Elevated", "Opportunity"],
-            index=0,
-            key="alert_priority_filter",
-        )
-
+        alert_filter = st.selectbox("Alert Priority Filter", ["All", "Critical", "Elevated", "Opportunity"], index=0)
         display_alerts = executive_alerts_df.copy()
-
         if alert_filter != "All":
             display_alerts = display_alerts[display_alerts["Priority"] == alert_filter]
-
         st.dataframe(display_alerts, use_container_width=True, height=500)
-
-        st.markdown("### BD Next-Move Queue")
-        for _, alert in display_alerts.head(8).iterrows():
-            priority = clean_value(alert.get("Priority"))
-            subject = clean_value(alert.get("Subject"))
-            action = clean_value(alert.get("Recommended Action"))
-            if priority == "Critical":
-                st.error(f"{subject}: {action}")
-            elif priority == "Elevated":
-                st.warning(f"{subject}: {action}")
-            else:
-                st.info(f"{subject}: {action}")
 
 
 with operations_tab:
@@ -1564,25 +1364,19 @@ with operations_tab:
 
     with left_panel:
         st.markdown("## Priority Infrastructure Queue")
-
         quick_search = st.text_input("Quick Project Filter", key="quick_project_filter")
         queue_df = filtered_df.copy()
 
         if not queue_df.empty and quick_search:
             queue_df = queue_df[
-                queue_df["canonical_project_name"].astype(str).str.contains(
-                    quick_search,
-                    case=False,
-                    na=False,
-                )
+                queue_df["canonical_project_name"].astype(str).str.contains(quick_search, case=False, na=False)
             ]
 
         if not queue_df.empty:
             queue_df = queue_df.sort_values(by="early_capture_score", ascending=False)
 
-        queue_limit = st.slider("Visible Queue Size", min_value=10, max_value=200, value=40, key="visible_queue_size")
-        queue_df = queue_df.head(queue_limit)
-        queue_df = add_relationship_counts_for_subset(queue_df, relationships_df)
+        queue_limit = st.slider("Visible Queue Size", 10, 200, 40)
+        queue_df = add_relationship_counts_for_subset(queue_df.head(queue_limit), relationships_df)
 
         if queue_df.empty:
             st.info("No projects match current filters.")
@@ -1595,7 +1389,11 @@ with operations_tab:
                 path_status = clean_value(project.get("relationship_path_status"), "No Path Yet")
                 project_id = clean_value(project.get("id"), f"row_{idx}")
 
-                if st.button(f"{project_name} | Score {score} | Rel {rel_count} | Cov {coverage_score}% | {path_status}", use_container_width=True, key=f"project_select_{project_id}_{idx}"):
+                if st.button(
+                    f"{project_name} | Score {score} | Rel {rel_count} | Cov {coverage_score}% | {path_status}",
+                    use_container_width=True,
+                    key=f"project_select_{project_id}_{idx}",
+                ):
                     st.session_state.selected_project = project_name
                     st.session_state.ribbon_message = f"{project_name} is now the active opportunity."
                     st.rerun()
@@ -1603,7 +1401,7 @@ with operations_tab:
         st.markdown("---")
         st.markdown("## Watchlist")
 
-        if st.button("⭐ Add Current Project", use_container_width=True, key="add_current_project_watchlist"):
+        if st.button("⭐ Add Current Project", use_container_width=True):
             current_project = st.session_state.selected_project
             if current_project and current_project not in st.session_state.watchlist:
                 st.session_state.watchlist.append(current_project)
@@ -1613,13 +1411,12 @@ with operations_tab:
             st.info("No watchlist projects yet.")
         else:
             for idx, watch_item in enumerate(list(st.session_state.watchlist)):
-                watch_col1, watch_col2 = st.columns([5, 1])
-                with watch_col1:
+                c1, c2 = st.columns([5, 1])
+                with c1:
                     if st.button(watch_item, key=f"watch_select_{idx}_{watch_item}", use_container_width=True):
                         st.session_state.selected_project = watch_item
-                        st.session_state.ribbon_message = f"{watch_item} is now the active opportunity."
                         st.rerun()
-                with watch_col2:
+                with c2:
                     if st.button("❌", key=f"watch_remove_{idx}_{watch_item}"):
                         st.session_state.watchlist.remove(watch_item)
                         st.rerun()
@@ -1637,9 +1434,10 @@ with operations_tab:
             else:
                 row = selected_df.iloc[0]
                 project_relationships, match_note = recover_relationships_for_project(row, relationships_df)
-                coverage_summary, coverage_score, missing_roles, coverage_status = build_coverage_summary(project_relationships)
+                coverage_summary, coverage_score, missing_roles, _ = build_coverage_summary(project_relationships)
                 path_status, path_score, _ = relationship_path_status(row, relationships_df)
                 coverage_score = max(coverage_score, path_score)
+                contractor_df = detect_contractor_ecosystem(row, relationships_df)
 
                 st.markdown(f"# {selected_project}")
 
@@ -1649,7 +1447,7 @@ with operations_tab:
                 s3.metric("MW", clean_value(row.get("estimated_power_mw")))
                 s4.metric("Relationships", len(project_relationships))
                 s5.metric("Coverage", f"{coverage_score}%")
-                s6.metric("Path", path_status)
+                s6.metric("DEWALT Score", f"{dewalt_opportunity_score(row, contractor_df)}/100")
 
                 st.caption(match_note)
 
@@ -1657,8 +1455,8 @@ with operations_tab:
                 for action in recommended_actions(row, len(project_relationships), coverage_score, missing_roles):
                     st.success(action)
 
-                overview_tab, strategy_tab, coverage_tab, relationship_tab, permit_tab, raw_tab = st.tabs(
-                    ["Overview", "Strategy", "Coverage", "Relationships", "Permit", "Raw Intel"]
+                overview_tab, strategy_tab, coverage_tab, relationship_tab, contractor_inner_tab, permit_tab, raw_tab = st.tabs(
+                    ["Overview", "Strategy", "Coverage", "Relationships", "Contractor Ecosystem", "Permit", "Raw Intel"]
                 )
 
                 with overview_tab:
@@ -1677,15 +1475,6 @@ with operations_tab:
                 with strategy_tab:
                     st.markdown("### Executive Strategic Assessment")
                     st.info(clean_value(row.get("strategic_notes"), "No strategic assessment generated yet."))
-
-                    st.markdown("### Infrastructure Risk Flags")
-                    risk_flags = clean_value(row.get("risk_flags"), "")
-                    if risk_flags == "":
-                        st.success("No critical infrastructure risks detected.")
-                    else:
-                        for risk in str(risk_flags).split(","):
-                            if risk.strip():
-                                st.warning(risk.strip())
 
                 with coverage_tab:
                     st.markdown("### Relationship Coverage Matrix")
@@ -1706,40 +1495,33 @@ with operations_tab:
                     else:
                         st.success(f"{len(project_relationships)} executive relationships identified")
                         st.caption(match_note)
-                        relationship_columns = [
+                        cols = [
                             "full_name", "title", "company", "canonical_company", "relationship_role", "email", "phone_number",
                             "linkedin_url", "influence_score", "influence_tier", "match_type", "match_strength",
                         ]
-                        existing_cols = [c for c in relationship_columns if c in project_relationships.columns]
+                        existing_cols = [c for c in cols if c in project_relationships.columns]
                         st.dataframe(project_relationships[existing_cols], use_container_width=True, height=450)
-                        st.markdown("## Contractor Ecosystem Intelligence")
 
-contractor_df = detect_contractor_ecosystem(row, relationships_df)
+                with contractor_inner_tab:
+                    st.markdown("### Contractor Ecosystem Intelligence")
+                    if contractor_df.empty:
+                        st.warning("No contractor ecosystem identified yet.")
+                    else:
+                        st.dataframe(contractor_df, use_container_width=True)
 
-if contractor_df.empty:
-
-    st.warning("No contractor ecosystem identified yet.")
-
-else:
-
-    st.dataframe(contractor_df, use_container_width=True)
-
-    st.success(
-        f"""
+                    st.success(
+                        f"""
 Labor Scale: {labor_intensity_estimate(row)}
 
 Procurement Stage: {procurement_stage(row)}
 
-DEWALT Opportunity Score:
-{dewalt_opportunity_score(row, contractor_df)}/100
+DEWALT Opportunity Score: {dewalt_opportunity_score(row, contractor_df)}/100
 
-Likely Distributor Ecosystem:
-{likely_distributors(contractor_df)}
+Likely Distributor Ecosystem: {likely_distributors(contractor_df)}
 
-Tool Demand Profile:
-{tool_demand_profile(row)}
+Tool Demand Profile: {tool_demand_profile(row)}
 """
-    )
+                    )
 
                 with permit_tab:
                     st.markdown("### Permit Intelligence")
@@ -1747,7 +1529,6 @@ Tool Demand Profile:
                     st.markdown(f"**Source Name:** {clean_value(row.get('source_name'))}")
                     st.markdown(f"**Source Type:** {clean_value(row.get('source_type'))}")
                     st.markdown(f"**Filing Date:** {clean_value(row.get('filing_date'))}")
-                    st.markdown("### Permit Description")
                     st.write(clean_value(row.get("permit_description"), "No permit description available."))
 
                 with raw_tab:
@@ -1760,7 +1541,6 @@ with deal_tab:
     st.markdown("## Executive Deal Control Center")
 
     selected_project = st.session_state.selected_project
-
     if not selected_project:
         st.info("Select a project from Opportunity Operations.")
     else:
@@ -1771,15 +1551,17 @@ with deal_tab:
         else:
             row = selected_df.iloc[0]
             project_relationships, match_note = recover_relationships_for_project(row, relationships_df)
-            coverage_summary, coverage_score, missing_roles, coverage_status = build_coverage_summary(project_relationships)
+            coverage_summary, coverage_score, missing_roles, _ = build_coverage_summary(project_relationships)
             path_status, path_score, _ = relationship_path_status(row, relationships_df)
             coverage_score = max(coverage_score, path_score)
+            contractor_df = detect_contractor_ecosystem(row, relationships_df)
 
             relationship_count = len(project_relationships)
             score = safe_number(row.get("early_capture_score"), 0)
             mw = safe_number(row.get("estimated_power_mw"), 0)
             threat = threat_level(score, mw, relationship_count, coverage_score)
             readiness = deal_readiness(score, relationship_count, mw, coverage_score)
+            dewalt_score = dewalt_opportunity_score(row, contractor_df)
 
             st.markdown(f"### {selected_project}")
 
@@ -1789,66 +1571,87 @@ with deal_tab:
             d3.metric("MW Opportunity", int(mw) if mw > 0 else "N/A")
             d4.metric("Relationships", relationship_count)
             d5.metric("Coverage", f"{coverage_score}%")
-            d6.metric("Threat Level", threat)
+            d6.metric("DEWALT Score", f"{dewalt_score}/100")
 
             st.caption(match_note)
             st.info(f"Relationship Path Status: {path_status}")
 
-            st.markdown("---")
-
-            control_left, control_right = st.columns([1.5, 1])
-
-            with control_left:
-                st.markdown("### Recommended BD Moves")
-                for action in recommended_actions(row, relationship_count, coverage_score, missing_roles):
-                    st.success(action)
-
-                st.markdown("### Deal Control Summary")
-                st.markdown(f"**Capture Stage:** {clean_value(row.get('capture_stage'))}")
-                st.markdown(f"**Project Stage:** {clean_value(row.get('project_stage'))}")
-                st.markdown(f"**Infrastructure Type:** {clean_value(row.get('infrastructure_type'))}")
-                st.markdown(f"**Market Cluster:** {clean_value(row.get('market_cluster'))}")
-                st.markdown(f"**County:** {clean_value(row.get('county'))}")
-                st.markdown(f"**Utility Dependency:** {clean_value(row.get('utility_dependency'))}")
-                st.markdown(f"**Missing Coverage Lanes:** {missing_roles}")
-
-            with control_right:
-                st.markdown("### Threat Intelligence")
-                if threat == "Critical":
-                    st.error("High-value opportunity with insufficient relationship coverage. Immediate BD escalation recommended.")
-                elif threat == "Elevated":
-                    st.warning("Strategic opportunity with meaningful capture upside. Relationship and utility paths should be tightened.")
-                else:
-                    st.info("Opportunity remains under active monitoring. Maintain watch posture.")
-
-                st.markdown("### Relationship Penetration")
-                if relationship_count == 0:
-                    st.error("No mapped or recovered executive relationships.")
-                elif coverage_score < 45:
-                    st.error("Relationship lanes are critically incomplete.")
-                elif coverage_score < 75:
-                    st.warning("Moderate relationship coverage. Fill missing lanes.")
-                else:
-                    st.success("Strong relationship coverage.")
-
-            st.markdown("---")
-            st.markdown("### Coverage Matrix")
-            coverage_df = pd.DataFrame(
-                [{"Coverage Lane": role, "Contacts": count, "Covered": "Yes" if count > 0 else "No"} for role, count in coverage_summary.items()]
-            )
-            st.dataframe(coverage_df, use_container_width=True, height=300)
-
-            st.markdown("### Executive Influence Ranking")
-
-            if project_relationships.empty:
-                st.warning("No executive relationships mapped to this opportunity.")
+            st.markdown("### Contractor Procurement Intelligence")
+            if contractor_df.empty:
+                st.warning("No contractor ecosystem identified yet.")
             else:
-                influence_cols = [
-                    "full_name", "title", "company", "canonical_company", "relationship_role", "email", "phone_number",
-                    "linkedin_url", "influence_score", "influence_tier", "match_type", "match_strength",
-                ]
-                available_influence_cols = [c for c in influence_cols if c in project_relationships.columns]
-                st.dataframe(project_relationships[available_influence_cols], use_container_width=True, height=450)
+                st.dataframe(contractor_df, use_container_width=True)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Labor Scale", labor_intensity_estimate(row))
+            c2.metric("Procurement Stage", procurement_stage(row))
+            c3.metric("Tool Demand", tool_demand_profile(row))
+
+            st.markdown("### Recommended DEWALT / SBD Moves")
+            for action in recommended_actions(row, relationship_count, coverage_score, missing_roles):
+                st.success(action)
+
+            if dewalt_score >= 80:
+                st.success("High-value DEWALT pursuit. Align national account, field sales, and distributor teams.")
+            elif dewalt_score >= 55:
+                st.warning("Moderate DEWALT opportunity. Monitor contractor award and MEP mobilization.")
+            else:
+                st.info("Monitor until contractor ecosystem or field procurement signals strengthen.")
+
+
+with contractor_tab:
+    st.markdown("## Contractor Ecosystem Intelligence")
+
+    contractor_rows = []
+
+    scan_df = filtered_df.head(500).copy()
+
+    for _, row in scan_df.iterrows():
+        contractor_df = detect_contractor_ecosystem(row, relationships_df)
+        dewalt_score = dewalt_opportunity_score(row, contractor_df)
+
+        if contractor_df.empty:
+            contractor_rows.append({
+                "project": clean_value(row.get("canonical_project_name")),
+                "contractor": "Unknown",
+                "contractor_type": "Unknown",
+                "dewalt_score": dewalt_score,
+                "labor_intensity": labor_intensity_estimate(row),
+                "procurement_stage": procurement_stage(row),
+                "tool_demand": tool_demand_profile(row),
+                "likely_distributors": "Unknown",
+            })
+        else:
+            for _, c in contractor_df.iterrows():
+                contractor_rows.append({
+                    "project": clean_value(row.get("canonical_project_name")),
+                    "contractor": c["contractor"],
+                    "contractor_type": c["type"],
+                    "contractor_strength": c["strength"],
+                    "preferred_brands": c["preferred_brands"],
+                    "dewalt_score": dewalt_score,
+                    "labor_intensity": labor_intensity_estimate(row),
+                    "procurement_stage": procurement_stage(row),
+                    "tool_demand": tool_demand_profile(row),
+                    "likely_distributors": likely_distributors(contractor_df),
+                })
+
+    contractor_intel_df = pd.DataFrame(contractor_rows)
+
+    if contractor_intel_df.empty:
+        st.info("No contractor intelligence generated.")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Scanned Projects", contractor_intel_df["project"].nunique())
+        c2.metric("Known Contractor Hits", len(contractor_intel_df[contractor_intel_df["contractor"] != "Unknown"]))
+        c3.metric("Avg DEWALT Score", int(contractor_intel_df["dewalt_score"].mean()))
+        c4.metric("High Priority", len(contractor_intel_df[contractor_intel_df["dewalt_score"] >= 80]))
+
+        st.dataframe(
+            contractor_intel_df.sort_values("dewalt_score", ascending=False),
+            use_container_width=True,
+            height=620,
+        )
 
 
 with relationships_tab:
@@ -1870,12 +1673,12 @@ with relationships_tab:
         "relationship_role", "email", "phone_number", "linkedin_url", "city", "state",
         "influence_score", "influence_tier", "research_status",
     ]
-    existing_relationship_cols = [c for c in relationship_columns if c in display_relationships.columns]
+    existing_cols = [c for c in relationship_columns if c in display_relationships.columns]
 
     if display_relationships.empty:
         st.info("No executive relationships found.")
     else:
-        st.dataframe(display_relationships[existing_relationship_cols], use_container_width=True, height=650)
+        st.dataframe(display_relationships[existing_cols], use_container_width=True, height=650)
 
 
 with accounts_tab:
@@ -1916,15 +1719,7 @@ with accounts_tab:
             height=420,
         )
 
-        selected_account = st.selectbox(
-            "Select Strategic Account",
-            top_accounts["account_name"].tolist(),
-            index=0,
-            key="selected_account_select",
-        )
-
-        st.session_state.selected_account = selected_account
-
+        selected_account = st.selectbox("Select Strategic Account", top_accounts["account_name"].tolist(), index=0)
         selected_profile = account_profiles[account_profiles["account_name"] == selected_account].iloc[0]
 
         st.markdown(f"## {selected_account} Account Control")
@@ -1940,7 +1735,7 @@ with accounts_tab:
         if selected_profile["account_risk"] == "Critical":
             st.error(f"Account risk is critical. Missing lanes: {selected_profile['missing_roles']}")
         elif selected_profile["account_risk"] == "Elevated":
-            st.warning(f"Account requires BD attention. Missing lanes: {selected_profile['missing_roles']}")
+            st.warning(f"Account requires attention. Missing lanes: {selected_profile['missing_roles']}")
         else:
             st.success("Account is in monitoring posture.")
 
@@ -1949,25 +1744,6 @@ with accounts_tab:
             [{"Coverage Lane": role, "Contacts": int(selected_profile[role]), "Covered": "Yes" if int(selected_profile[role]) > 0 else "No"} for role in COVERAGE_ROLES]
         )
         st.dataframe(account_coverage_df, use_container_width=True, height=300)
-
-        account_project_df = filtered_df.copy()
-        if not account_project_df.empty:
-            account_project_df["account_name"] = account_project_df.apply(primary_account, axis=1)
-            account_project_df = account_project_df[account_project_df["account_name"] == selected_account]
-
-            st.markdown("### Account Project Portfolio")
-            account_cols = [
-                "canonical_project_name",
-                "capture_stage",
-                "early_capture_score",
-                "estimated_power_mw",
-                "infrastructure_type",
-                "project_stage",
-                "county",
-                "market_cluster",
-            ]
-            available_account_cols = [c for c in account_cols if c in account_project_df.columns]
-            st.dataframe(account_project_df[available_account_cols].head(50), use_container_width=True, height=360)
 
         account_relationships = pd.DataFrame()
         if not relationships_df.empty and "canonical_company" in relationships_df.columns:
@@ -2001,30 +1777,6 @@ with analytics_tab:
             st.plotly_chart(fig, use_container_width=True)
 
     with a2:
-        st.markdown("### Alert Priority Distribution")
-        if not executive_alerts_df.empty:
-            alert_chart = executive_alerts_df["Priority"].value_counts().reset_index()
-            alert_chart.columns = ["Priority", "Alerts"]
-            fig = px.bar(alert_chart, x="Priority", y="Alerts", template="plotly_dark", color="Priority")
-            fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No alert distribution available.")
-
-    b1, b2 = st.columns(2)
-
-    with b1:
-        st.markdown("### Signals Over Time")
-        if not filtered_df.empty and "created_at" in filtered_df.columns:
-            trend_df = filtered_df.dropna(subset=["created_at"]).copy()
-            if not trend_df.empty:
-                trend_df["date"] = trend_df["created_at"].dt.date
-                trend_chart = trend_df.groupby("date").size().reset_index(name="Signals")
-                fig = px.line(trend_chart, x="date", y="Signals", template="plotly_dark", markers=True)
-                fig.update_layout(height=360, margin=dict(l=20, r=20, t=20, b=20))
-                st.plotly_chart(fig, use_container_width=True)
-
-    with b2:
         st.markdown("### Relationship Role Distribution")
         if not relationships_df.empty and "relationship_role" in relationships_df.columns:
             role_chart = relationships_df["relationship_role"].value_counts().reset_index()
@@ -2037,7 +1789,7 @@ with analytics_tab:
 with exports_tab:
     st.markdown("## Export Intelligence")
 
-    if st.button("Run Full Relationship Recovery Gap Report", key="run_gap_report"):
+    if st.button("Run Full Relationship Recovery Gap Report"):
         with st.spinner("Running full recovery pass across all projects..."):
             st.session_state.gap_report_df = build_gap_report(projects_df, relationships_df)
         st.success("Gap report generated.")
@@ -2048,7 +1800,6 @@ with exports_tab:
             filtered_df.to_csv(index=False),
             "infrastructure_intelligence.csv",
             "text/csv",
-            key="download_infrastructure_csv",
         )
 
     if not relationships_df.empty:
@@ -2057,7 +1808,6 @@ with exports_tab:
             relationships_df.to_csv(index=False),
             "executive_relationship_pipeline.csv",
             "text/csv",
-            key="download_relationship_csv",
         )
 
     if not account_profiles_global.empty:
@@ -2066,7 +1816,6 @@ with exports_tab:
             account_profiles_global.to_csv(index=False),
             "strategic_account_intelligence.csv",
             "text/csv",
-            key="download_account_intelligence_csv",
         )
 
     if not executive_alerts_df.empty:
@@ -2075,7 +1824,6 @@ with exports_tab:
             executive_alerts_df.to_csv(index=False),
             "executive_alert_feed.csv",
             "text/csv",
-            key="download_executive_alert_feed_csv",
         )
 
     if not st.session_state.gap_report_df.empty:
@@ -2084,12 +1832,11 @@ with exports_tab:
             st.session_state.gap_report_df.to_csv(index=False),
             "relationship_coverage_gap_report.csv",
             "text/csv",
-            key="download_relationship_gap_report",
         )
 
-    if st.button("Sign Out", key="sign_out_button"):
+    if st.button("Sign Out"):
         st.session_state.user = None
         st.rerun()
 
 
-st.caption("Allen Hammett AI • Institutional Infrastructure Intelligence Operating System")
+st.caption("Allen Hammett AI • DEWALT / Stanley Black & Decker Infrastructure Capture Intelligence Operating System")
