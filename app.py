@@ -1,253 +1,183 @@
-# =========================================================
-# PHASE 11B — TRADE PACKAGE + DEWALT DEMAND ENGINE
-# =========================================================
-
 CONTRACTOR_ECOSYSTEM = {
-    "Turner": {
-        "category": "GC",
-        "dewalt_alignment": "Very High"
+    "DPR Construction": {
+        "type": "Prime GC",
+        "strength": 95,
+        "preferred_brands": ["DEWALT", "Milwaukee", "Hilti"],
+        "distributors": ["White Cap", "Fastenal", "Grainger"],
     },
-    "Holder": {
-        "category": "GC",
-        "dewalt_alignment": "High"
-    },
-    "Whiting-Turner": {
-        "category": "GC",
-        "dewalt_alignment": "Very High"
+    "Turner Construction": {
+        "type": "Prime GC",
+        "strength": 94,
+        "preferred_brands": ["DEWALT", "Milwaukee"],
+        "distributors": ["White Cap", "HD Supply", "Grainger"],
     },
     "HITT": {
-        "category": "GC",
-        "dewalt_alignment": "High"
+        "type": "Prime GC",
+        "strength": 88,
+        "preferred_brands": ["DEWALT", "Milwaukee"],
+        "distributors": ["White Cap", "Fastenal"],
     },
-    "DPR": {
-        "category": "GC",
-        "dewalt_alignment": "Very High"
+    "Clayco": {
+        "type": "Prime GC",
+        "strength": 86,
+        "preferred_brands": ["DEWALT"],
+        "distributors": ["White Cap", "Grainger"],
     },
-    "AECOM": {
-        "category": "Engineering",
-        "dewalt_alignment": "Medium"
+    "Whiting-Turner": {
+        "type": "Prime GC",
+        "strength": 90,
+        "preferred_brands": ["Milwaukee", "DEWALT"],
+        "distributors": ["Fastenal", "Grainger"],
     },
     "Rosendin": {
-        "category": "Electrical",
-        "dewalt_alignment": "Very High"
+        "type": "MEP / Electrical",
+        "strength": 91,
+        "preferred_brands": ["DEWALT", "Milwaukee"],
+        "distributors": ["Graybar", "Wesco"],
     },
     "M.C. Dean": {
-        "category": "Electrical",
-        "dewalt_alignment": "Very High"
-    }
+        "type": "Mission Critical Electrical",
+        "strength": 98,
+        "preferred_brands": ["DEWALT", "Hilti"],
+        "distributors": ["Graybar", "Border States"],
+    },
+    "Dynaelectric": {
+        "type": "Electrical Contractor",
+        "strength": 82,
+        "preferred_brands": ["DEWALT"],
+        "distributors": ["Graybar"],
+    },
+    "Cupertino Electric": {
+        "type": "Mission Critical Electrical",
+        "strength": 93,
+        "preferred_brands": ["Milwaukee", "DEWALT"],
+        "distributors": ["Wesco", "Graybar"],
+    },
 }
 
 
-def infer_project_phase(project_name):
+def detect_contractor_ecosystem(project_row, relationships_df):
+    project_text = normalize_text(" ".join([
+        clean_value(project_row.get("canonical_project_name"), ""),
+        clean_value(project_row.get("project_name"), ""),
+        clean_value(project_row.get("permit_description"), ""),
+        clean_value(project_row.get("raw_text"), ""),
+        clean_value(project_row.get("strategic_notes"), ""),
+    ]))
 
-    name = str(project_name).lower()
+    detected = []
 
-    if any(x in name for x in [
-        "rezoning",
-        "land use",
-        "site plan",
-        "permit",
-        "application",
-        "floodplain"
-    ]):
-        return "Pre-Construction"
+    for contractor, data in CONTRACTOR_ECOSYSTEM.items():
 
-    if any(x in name for x in [
-        "substation",
-        "utility",
-        "transmission",
-        "power"
-    ]):
-        return "Power + Utility Infrastructure"
+        contractor_text = normalize_text(contractor)
 
-    if any(x in name for x in [
-        "grading",
-        "civil",
-        "sitework",
-        "earthwork"
-    ]):
-        return "Site Development"
+        found = False
 
-    if any(x in name for x in [
-        "steel",
-        "shell",
-        "structure"
-    ]):
-        return "Structural Buildout"
+        if contractor_text in project_text:
+            found = True
 
-    if any(x in name for x in [
-        "fit out",
-        "interior",
-        "commissioning"
-    ]):
-        return "Commissioning"
+        if not relationships_df.empty:
 
-    return "Core Construction"
+            contractor_matches = relationships_df[
+                relationships_df["canonical_company"].astype(str).str.lower()
+                == contractor.lower()
+            ]
 
+            if len(contractor_matches) >= 1:
+                found = True
 
-def next_buying_window(phase):
+        if found:
+            detected.append({
+                "contractor": contractor,
+                "type": data["type"],
+                "strength": data["strength"],
+                "preferred_brands": ", ".join(data["preferred_brands"]),
+                "distributors": ", ".join(data["distributors"]),
+            })
 
-    mapping = {
-        "Pre-Construction":
-            "Engineering + specification positioning",
+    return pd.DataFrame(detected)
 
-        "Power + Utility Infrastructure":
-            "Electrical contractor engagement",
 
-        "Site Development":
-            "Civil + concrete procurement",
+def labor_intensity_estimate(project_row):
 
-        "Structural Buildout":
-            "Steel + fastening + anchor systems",
+    mw = safe_number(project_row.get("estimated_power_mw"), 0)
 
-        "Core Construction":
-            "High-volume cordless + trade deployment",
+    if mw >= 500:
+        return "Hyperscale Workforce"
 
-        "Commissioning":
-            "Operations + maintenance conversion"
-    }
+    if mw >= 250:
+        return "Heavy Mission Critical Workforce"
 
-    return mapping.get(phase, "General contractor engagement")
+    if mw >= 100:
+        return "Large Workforce"
 
+    if mw >= 40:
+        return "Moderate Workforce"
 
-def dewalt_product_push(phase):
+    return "Specialized Workforce"
 
-    products = {
-        "Pre-Construction":
-            "Laser measurement, layout tools, BIM support",
 
-        "Power + Utility Infrastructure":
-            "Electrical tools, bandsaws, knockout systems, storage",
+def procurement_stage(project_row):
 
-        "Site Development":
-            "Concrete anchors, outdoor power equipment, generators",
+    stage = normalize_text(project_row.get("project_stage"))
 
-        "Structural Buildout":
-            "Fastening systems, drills, impacts, anchors",
+    if any(x in stage for x in ["concept", "planning", "rezoning"]):
+        return "Pre-Procurement"
 
-        "Core Construction":
-            "20V MAX platform, FLEXVOLT, storage, safety gear",
+    if any(x in stage for x in ["review", "submitted", "approval"]):
+        return "Contractor Positioning"
 
-        "Commissioning":
-            "Maintenance kits, diagnostics, service contracts"
-    }
+    if any(x in stage for x in ["construction", "grading", "site work"]):
+        return "Field Procurement Active"
 
-    return products.get(phase, "General DEWALT deployment")
+    if any(x in stage for x in ["fit out", "commissioning"]):
+        return "MEP + Tool Deployment"
 
+    return "Monitoring"
 
-def sales_action(score, relationships):
 
-    if score >= 120 and relationships >= 25:
-        return "EXECUTIVE PURSUIT"
+def dewalt_opportunity_score(project_row, contractor_df):
 
-    if score >= 90:
-        return "CONTRACTOR ENGAGEMENT"
+    score = 0
 
-    if relationships >= 10:
-        return "EXPAND ACCOUNT PENETRATION"
+    mw = safe_number(project_row.get("estimated_power_mw"), 0)
+    capture = safe_number(project_row.get("early_capture_score"), 0)
 
-    return "BUILD RELATIONSHIP COVERAGE"
+    score += min(mw / 10, 40)
+    score += min(capture / 2, 40)
 
+    if not contractor_df.empty:
+        score += 20
 
-# =========================================================
-# BUILD ENRICHED OPPORTUNITY DATAFRAME
-# =========================================================
+    return int(min(score, 100))
 
-def build_dewalt_intelligence_layer(df):
 
-    enriched_rows = []
+def likely_distributors(contractor_df):
 
-    for _, row in df.iterrows():
+    if contractor_df.empty:
+        return "Unknown"
 
-        phase = infer_project_phase(
-            row.get("canonical_project_name", "")
-        )
+    distributors = set()
 
-        relationships = int(
-            row.get("relationship_inventory", 0)
-        )
+    for _, row in contractor_df.iterrows():
 
-        score = int(
-            row.get("max_capture_score", 0)
-        )
+        for d in str(row["distributors"]).split(","):
+            distributors.add(d.strip())
 
-        enriched_rows.append({
-            "project":
-                row.get("canonical_project_name", ""),
+    return ", ".join(sorted(distributors))
 
-            "account":
-                row.get("account_name", ""),
 
-            "market":
-                row.get("market", "Ashburn"),
+def tool_demand_profile(project_row):
 
-            "phase":
-                phase,
+    infrastructure = normalize_text(project_row.get("infrastructure_type"))
+    mw = safe_number(project_row.get("estimated_power_mw"), 0)
 
-            "buying_window":
-                next_buying_window(phase),
+    if "data center" in infrastructure:
 
-            "dewalt_strategy":
-                dewalt_product_push(phase),
+        if mw >= 250:
+            return "Hyperscale Tool Deployment"
 
-            "sales_action":
-                sales_action(score, relationships),
+        if mw >= 100:
+            return "Heavy Mission Critical Tool Demand"
 
-            "relationships":
-                relationships,
-
-            "capture_score":
-                score,
-
-            "mw":
-                row.get("total_mw", 0)
-        })
-
-    return pd.DataFrame(enriched_rows)
-
-
-# =========================================================
-# DEWALT COMMAND CENTER TAB
-# =========================================================
-
-with tab_market:
-
-    st.markdown("## DEWALT Strategic Demand Engine")
-
-    dewalt_df = build_dewalt_intelligence_layer(account_df)
-
-    st.dataframe(
-        dewalt_df,
-        use_container_width=True,
-        height=700
-    )
-
-    st.markdown("---")
-
-    st.markdown("## Executive Pursuit Targets")
-
-    pursuit_df = dewalt_df[
-        dewalt_df["sales_action"] == "EXECUTIVE PURSUIT"
-    ]
-
-    st.dataframe(
-        pursuit_df,
-        use_container_width=True,
-        height=400
-    )
-
-    st.markdown("---")
-
-    st.markdown("## Phase Distribution")
-
-    phase_counts = (
-        dewalt_df["phase"]
-        .value_counts()
-        .reset_index()
-    )
-
-    phase_counts.columns = ["Phase", "Projects"]
-
-    st.bar_chart(
-        phase_counts.set_index("Phase")
-    )
+    return "Standard Infrastructure Tool Demand"
