@@ -1,11 +1,11 @@
 import os
-import psycopg2
+from difflib import SequenceMatcher
+
 import pandas as pd
+import psycopg2
 import streamlit as st
 import plotly.express as px
-
 from dotenv import load_dotenv
-from difflib import SequenceMatcher
 
 # ====================================================
 # ENV + DB CONNECTION
@@ -13,50 +13,75 @@ from difflib import SequenceMatcher
 
 load_dotenv()
 
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+# Prefer Streamlit secrets, fall back to env vars
+DB_HOST = st.secrets.get("DB_HOST", os.getenv("DB_HOST"))
+DB_PORT = st.secrets.get("DB_PORT", os.getenv("DB_PORT", "5432"))
+DB_NAME = st.secrets.get("DB_NAME", os.getenv("DB_NAME"))
+DB_USER = st.secrets.get("DB_USER", os.getenv("DB_USER"))
+DB_PASSWORD = st.secrets.get("DB_PASSWORD", os.getenv("DB_PASSWORD"))
 
 @st.cache_resource(show_spinner=False)
 def get_connection():
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-    )
-    return conn
+    # Basic validation so we fail gracefully instead of psycopg2 blowing up
+    missing = []
+    if not DB_HOST:
+        missing.append("DB_HOST")
+    if not DB_NAME:
+        missing.append("DB_NAME")
+    if not DB_USER:
+        missing.append("DB_USER")
+    if not DB_PASSWORD:
+        missing.append("DB_PASSWORD")
+
+    if missing:
+        st.error(
+            "Database configuration is incomplete. "
+            f"Missing: {', '.join(missing)}. "
+            "Set these in Streamlit Secrets or environment variables."
+        )
+        st.stop()
+
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            sslmode="require",  # critical for most managed Postgres providers
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        st.error(
+            "Database connection failed. "
+            "Verify host, credentials, SSL requirements, and firewall rules."
+        )
+        # Optionally surface minimal info for debugging (no secrets)
+        st.write("DB_HOST:", DB_HOST)
+        st.write("DB_NAME:", DB_NAME)
+        st.stop()
+    except Exception as e:
+        st.error("Unexpected error while connecting to the database.")
+        st.stop()
 
 @st.cache_data(show_spinner=False)
 def load_projects():
     conn = get_connection()
-    query = """
-        SELECT *
-        FROM projects
-    """
+    query = "SELECT * FROM projects"
     df = pd.read_sql(query, conn)
     return df
 
 @st.cache_data(show_spinner=False)
 def load_executive_matches():
     conn = get_connection()
-    query = """
-        SELECT *
-        FROM executive_project_matches
-    """
+    query = "SELECT * FROM executive_project_matches"
     df = pd.read_sql(query, conn)
     return df
 
 @st.cache_data(show_spinner=False)
 def load_users():
     conn = get_connection()
-    query = """
-        SELECT *
-        FROM users
-    """
+    query = "SELECT * FROM users"
     df = pd.read_sql(query, conn)
     return df
 
@@ -92,7 +117,7 @@ def login_ui():
             st.error("Invalid credentials. Please try again.")
 
 # ====================================================
-# PHASE 11B INTELLIGENCE LAYER (INLINE)
+# PHASE 11B INTELLIGENCE LAYER
 # ====================================================
 
 TARGET_CONTRACTORS = [
@@ -116,7 +141,7 @@ def recover_relationships(projects_df: pd.DataFrame, matches_df: pd.DataFrame) -
 
     recovered_rows = []
 
-    for idx, prow in projects_df.iterrows():
+    for _, prow in projects_df.iterrows():
         project_id = prow.get("project_id")
         if "project_id" in matches_df.columns:
             existing = matches_df[matches_df["project_id"] == project_id]
@@ -232,7 +257,6 @@ def build_project_relationship_view():
     projects_df = load_projects()
     matches_df = load_executive_matches()
 
-    # Direct merge
     if "project_id" in projects_df.columns and "project_id" in matches_df.columns:
         merged_direct = projects_df.merge(
             matches_df,
@@ -243,7 +267,6 @@ def build_project_relationship_view():
     else:
         merged_direct = projects_df.copy()
 
-    # Recovery
     recovered_matches = recover_relationships(projects_df, matches_df)
 
     if not recovered_matches.empty:
@@ -298,27 +321,30 @@ def render_command_wall(projects_df: pd.DataFrame):
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("#### Project List")
-    st.dataframe(
-        projects_df[[
-            c for c in projects_df.columns
-            if c in ["project_id", "project_name", "canonical_company", "developer",
-                     "owner", "relationship_status", "relationship_count"]
-        ]],
-        use_container_width=True
-    )
+    cols = [
+        c for c in projects_df.columns
+        if c in [
+            "project_id", "project_name", "canonical_company", "developer",
+            "owner", "relationship_status", "relationship_count"
+        ]
+    ]
+    if cols:
+        st.dataframe(projects_df[cols], use_container_width=True)
+    else:
+        st.dataframe(projects_df, use_container_width=True)
 
 def render_opportunity_operations(projects_df: pd.DataFrame, merged_all: pd.DataFrame):
     st.subheader("Opportunity Operations")
 
-    if "project_name" in projects_df.columns:
-        project_selection = st.selectbox(
-            "Select Project",
-            projects_df["project_name"].dropna().unique()
-        )
-        proj_row = projects_df[projects_df["project_name"] == project_selection].iloc[0]
-    else:
+    if "project_name" not in projects_df.columns:
         st.warning("No project_name column found.")
         return
+
+    project_selection = st.selectbox(
+        "Select Project",
+        projects_df["project_name"].dropna().unique()
+    )
+    proj_row = projects_df[projects_df["project_name"] == project_selection].iloc[0]
 
     st.markdown("##### Project Snapshot")
     cols = st.columns(4)
@@ -336,9 +362,11 @@ def render_opportunity_operations(projects_df: pd.DataFrame, merged_all: pd.Data
     if not proj_contacts.empty:
         cols_to_show = [
             c for c in proj_contacts.columns
-            if c in ["contact_id", "full_name", "title", "email",
-                     "linkedin_url", "relationship_role", "influence_score",
-                     "canonical_company"]
+            if c in [
+                "contact_id", "full_name", "title", "email",
+                "linkedin_url", "relationship_role", "influence_score",
+                "canonical_company"
+            ]
         ]
         st.dataframe(proj_contacts[cols_to_show], use_container_width=True)
     else:
@@ -366,8 +394,10 @@ def render_relationship_command(projects_df: pd.DataFrame, merged_all: pd.DataFr
     if not proj_contacts.empty:
         cols_to_show = [
             c for c in proj_contacts.columns
-            if c in ["full_name", "title", "email", "linkedin_url",
-                     "relationship_role", "influence_score", "canonical_company"]
+            if c in [
+                "full_name", "title", "email", "linkedin_url",
+                "relationship_role", "influence_score", "canonical_company"
+            ]
         ]
         st.dataframe(proj_contacts[cols_to_show], use_container_width=True)
     else:
@@ -409,7 +439,6 @@ def render_relationship_command(projects_df: pd.DataFrame, merged_all: pd.DataFr
 def render_account_intelligence(projects_df: pd.DataFrame, merged_all: pd.DataFrame):
     st.subheader("Account Intelligence")
 
-    # Aggregate by canonical_company / developer / owner
     account_dim = "canonical_company" if "canonical_company" in projects_df.columns else None
     if not account_dim:
         st.warning("No canonical_company column found for account intelligence.")
@@ -420,14 +449,14 @@ def render_account_intelligence(projects_df: pd.DataFrame, merged_all: pd.DataFr
 
     acct_projects = projects_df[projects_df[account_dim] == account_selection]
     st.markdown(f"##### Projects for {account_selection}")
-    st.dataframe(
-        acct_projects[[
-            c for c in acct_projects.columns
-            if c in ["project_id", "project_name", "developer", "owner",
-                     "relationship_status", "relationship_count"]
-        ]],
-        use_container_width=True
-    )
+    cols = [
+        c for c in acct_projects.columns
+        if c in [
+            "project_id", "project_name", "developer", "owner",
+            "relationship_status", "relationship_count"
+        ]
+    ]
+    st.dataframe(acct_projects[cols], use_container_width=True)
 
     if "canonical_company" in merged_all.columns:
         acct_contacts = merged_all[
