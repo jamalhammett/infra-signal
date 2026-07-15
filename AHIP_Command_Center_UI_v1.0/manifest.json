@@ -1,0 +1,10 @@
+{
+  "package_name": "AHIP Command Center UI",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/command_center/ui.py",
+      "destination": "devkit/command_center/ui.py"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "package_name": "AHIP Command Center Logging",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/command_center/logging.py",
+      "destination": "devkit/command_center/logging.py"
+    }
+  ]
+}

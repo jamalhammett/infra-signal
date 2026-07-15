@@ -1,0 +1,10 @@
+{
+  "package_name": "Knowledge Acquisition Engine - Ingestion",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/knowledge_engine/ingestion.py",
+      "destination": "devkit/knowledge_engine/ingestion.py"
+    }
+  ]
+}

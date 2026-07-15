@@ -1,0 +1,18 @@
+{
+  "package_name": "AHIP Command Center Core",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/command_center/__init__.py",
+      "destination": "devkit/command_center/__init__.py"
+    },
+    {
+      "source": "payload/devkit/command_center/core.py",
+      "destination": "devkit/command_center/core.py"
+    },
+    {
+      "source": "payload/tests/test_command_center_core.py",
+      "destination": "tests/test_command_center_core.py"
+    }
+  ]
+}

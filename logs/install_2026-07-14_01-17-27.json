@@ -1,0 +1,37 @@
+{
+  "devkit_version": "1.0.0",
+  "package_name": "AHIP DevKit Enterprise",
+  "package_version": "1.0.0",
+  "repository": "\\\\192.168.0.147\\1. AllenHammettInc\\R&D\\Infra-signal",
+  "timestamp": "2026-07-14_01-17-27",
+  "success": true,
+  "elapsed_seconds": 0.937,
+  "backup_directory": "\\\\192.168.0.147\\1. AllenHammettInc\\R&D\\Infra-signal\\backups\\install_2026-07-14_01-17-27",
+  "error": null,
+  "files": [
+    {
+      "source": "payload/devkit/install.bat",
+      "destination": "devkit/install.bat",
+      "action": "updated",
+      "status": "success",
+      "checksum": "c85677b727436cfb1b6ca63239d31afb2e9250194482066f12ff3243b804a172",
+      "message": null
+    },
+    {
+      "source": "payload/devkit/installer.py",
+      "destination": "devkit/installer.py",
+      "action": "updated",
+      "status": "success",
+      "checksum": "4467ac320e4f5067eaff21e3862ea9a5ff7f33a1d59f4e3bff447296b4d377db",
+      "message": null
+    },
+    {
+      "source": "payload/devkit/README.md",
+      "destination": "devkit/README.md",
+      "action": "installed",
+      "status": "success",
+      "checksum": "6342e8650332a32341014851fb2d01e020888326cdac5a889440c9e7aac89118",
+      "message": null
+    }
+  ]
+}

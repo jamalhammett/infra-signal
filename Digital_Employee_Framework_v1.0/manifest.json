@@ -1,0 +1,14 @@
+{
+  "package_name": "Digital Employee Framework",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/digital_employee/__init__.py",
+      "destination": "devkit/digital_employee/__init__.py"
+    },
+    {
+      "source": "payload/devkit/digital_employee/framework.py",
+      "destination": "devkit/digital_employee/framework.py"
+    }
+  ]
+}

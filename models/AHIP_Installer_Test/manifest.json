@@ -1,0 +1,30 @@
+{
+  "package": "AHIP Demand Package",
+  "version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/phase_detection.py",
+      "destination": "engines/demand/phase_detection.py"
+    },
+    {
+      "source": "payload/buying_window.py",
+      "destination": "engines/demand/buying_window.py"
+    },
+    {
+      "source": "payload/procurement_timeline.py",
+      "destination": "engines/demand/procurement_timeline.py"
+    },
+    {
+      "source": "payload/product_forecast.py",
+      "destination": "engines/demand/product_forecast.py"
+    },
+    {
+      "source": "payload/revenue_forecast.py",
+      "destination": "engines/demand/revenue_forecast.py"
+    },
+    {
+      "source": "payload/sales_playbook.py",
+      "destination": "engines/demand/sales_playbook.py"
+    }
+  ]
+}

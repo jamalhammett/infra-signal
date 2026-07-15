@@ -1,0 +1,10 @@
+{
+  "package_name": "Cyber CoE Integration",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/digital_employee/cyber_coe_integration.py",
+      "destination": "devkit/digital_employee/cyber_coe_integration.py"
+    }
+  ]
+}

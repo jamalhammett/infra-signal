@@ -1,0 +1,10 @@
+{
+  "package_name": "AI CFO",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/digital_employee/ai_cfo.py",
+      "destination": "devkit/digital_employee/ai_cfo.py"
+    }
+  ]
+}

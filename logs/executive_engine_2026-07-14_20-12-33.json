@@ -1,0 +1,18 @@
+{
+  "package": "AHIP Executive Engine",
+  "version": "1.0.0",
+  "repository": "\\\\192.168.0.147\\1. AllenHammettInc\\R&D\\Infra-signal",
+  "installed": 1,
+  "updated": 1,
+  "skipped": 0,
+  "records": [
+    {
+      "file": "engines/executive_engine.py",
+      "action": "updated"
+    },
+    {
+      "file": "tests/test_executive_engine.py",
+      "action": "installed"
+    }
+  ]
+}

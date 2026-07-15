@@ -1,0 +1,14 @@
+{
+  "package_name": "AHIP Account Engine",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/engines/account_engine.py",
+      "destination": "engines/account_engine.py"
+    },
+    {
+      "source": "payload/tests/test_account_engine.py",
+      "destination": "tests/test_account_engine.py"
+    }
+  ]
+}

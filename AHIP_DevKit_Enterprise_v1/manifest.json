@@ -1,0 +1,19 @@
+{
+  "package_name": "AHIP DevKit Enterprise",
+  "package_version": "1.0.0",
+  "description": "Installs AHIP DevKit Enterprise into infra-signal.",
+  "files": [
+    {
+      "source": "payload/devkit/install.bat",
+      "destination": "devkit/install.bat"
+    },
+    {
+      "source": "payload/devkit/installer.py",
+      "destination": "devkit/installer.py"
+    },
+    {
+      "source": "payload/devkit/README.md",
+      "destination": "devkit/README.md"
+    }
+  ]
+}

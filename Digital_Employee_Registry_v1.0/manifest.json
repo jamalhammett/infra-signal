@@ -1,0 +1,14 @@
+{
+  "package_name": "Digital Employee Registry",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/digital_employee/registry.py",
+      "destination": "devkit/digital_employee/registry.py"
+    },
+    {
+      "source": "payload/devkit/digital_employee/employees.json",
+      "destination": "devkit/digital_employee/employees.json"
+    }
+  ]
+}

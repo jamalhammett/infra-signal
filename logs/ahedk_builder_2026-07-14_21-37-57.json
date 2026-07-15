@@ -1,0 +1,20 @@
+{
+  "package_name": "AHEDK Builder",
+  "package_version": "1.1.0",
+  "repository": "\\\\192.168.0.147\\1. AllenHammettInc\\R&D\\Infra-signal",
+  "success": true,
+  "records": [
+    {
+      "source": "payload/devkit/__init__.py",
+      "destination": "devkit/__init__.py",
+      "action": "installed",
+      "checksum": "49d3c4dfe352f2b746bdc4509fa9933e4129abfa3693476b6b72a8a816079f72"
+    },
+    {
+      "source": "payload/devkit/builder.py",
+      "destination": "devkit/builder.py",
+      "action": "installed",
+      "checksum": "73d7395ed2077f439baf6c22c8d37feaca2c2639e70d9054851f86f9df30c935"
+    }
+  ]
+}

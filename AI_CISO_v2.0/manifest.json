@@ -1,0 +1,10 @@
+{
+  "package_name": "AI CISO v2.0",
+  "package_version": "2.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/digital_employee/ai_ciso_v2.py",
+      "destination": "devkit/digital_employee/ai_ciso_v2.py"
+    }
+  ]
+}

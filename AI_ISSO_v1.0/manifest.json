@@ -1,0 +1,10 @@
+{
+  "package_name": "AI ISSO",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/digital_employee/ai_isso.py",
+      "destination": "devkit/digital_employee/ai_isso.py"
+    }
+  ]
+}

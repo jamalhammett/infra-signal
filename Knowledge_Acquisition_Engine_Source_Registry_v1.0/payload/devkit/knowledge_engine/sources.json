@@ -1,0 +1,46 @@
+{
+  "sources": [
+    {
+      "name": "NIST",
+      "category": "Standard",
+      "url": "https://csrc.nist.gov",
+      "license": "Public",
+      "confidence": 1.0
+    },
+    {
+      "name": "CISA",
+      "category": "Government",
+      "url": "https://www.cisa.gov",
+      "license": "Public",
+      "confidence": 1.0
+    },
+    {
+      "name": "MITRE ATT&CK",
+      "category": "Framework",
+      "url": "https://attack.mitre.org",
+      "license": "Public",
+      "confidence": 0.99
+    },
+    {
+      "name": "Cisco",
+      "category": "Vendor",
+      "url": "https://www.cisco.com",
+      "license": "Vendor Docs",
+      "confidence": 0.98
+    },
+    {
+      "name": "Tenable",
+      "category": "Vendor",
+      "url": "https://www.tenable.com",
+      "license": "Vendor Docs",
+      "confidence": 0.98
+    },
+    {
+      "name": "Infoblox",
+      "category": "Vendor",
+      "url": "https://www.infoblox.com",
+      "license": "Vendor Docs",
+      "confidence": 0.98
+    }
+  ]
+}

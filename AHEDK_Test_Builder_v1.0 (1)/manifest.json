@@ -1,0 +1,10 @@
+{
+  "package_name": "AHEDK Test Builder",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/generators/test_builder.py",
+      "destination": "devkit/generators/test_builder.py"
+    }
+  ]
+}

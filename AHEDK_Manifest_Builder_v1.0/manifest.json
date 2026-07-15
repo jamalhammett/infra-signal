@@ -1,0 +1,10 @@
+{
+  "package_name": "AHEDK Manifest Builder",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/generators/manifest_builder.py",
+      "destination": "devkit/generators/manifest_builder.py"
+    }
+  ]
+}

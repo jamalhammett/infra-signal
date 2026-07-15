@@ -1,0 +1,14 @@
+{
+  "package_name": "AHEDK Engine Builder",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/generators/__init__.py",
+      "destination": "devkit/generators/__init__.py"
+    },
+    {
+      "source": "payload/devkit/generators/engine_builder.py",
+      "destination": "devkit/generators/engine_builder.py"
+    }
+  ]
+}

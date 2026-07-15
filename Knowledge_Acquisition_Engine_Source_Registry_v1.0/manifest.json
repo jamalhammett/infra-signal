@@ -1,0 +1,14 @@
+{
+  "package_name": "Knowledge Acquisition Engine - Source Registry",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/knowledge_engine/source_registry.py",
+      "destination": "devkit/knowledge_engine/source_registry.py"
+    },
+    {
+      "source": "payload/devkit/knowledge_engine/sources.json",
+      "destination": "devkit/knowledge_engine/sources.json"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "package_name": "AHIP Command Center Enterprise",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/command_center/enterprise.py",
+      "destination": "devkit/command_center/enterprise.py"
+    }
+  ]
+}

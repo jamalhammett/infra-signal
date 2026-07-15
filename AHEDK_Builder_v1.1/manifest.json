@@ -1,0 +1,14 @@
+{
+  "package_name": "AHEDK Builder",
+  "package_version": "1.1.0",
+  "files": [
+    {
+      "source": "payload/devkit/__init__.py",
+      "destination": "devkit/__init__.py"
+    },
+    {
+      "source": "payload/devkit/builder.py",
+      "destination": "devkit/builder.py"
+    }
+  ]
+}

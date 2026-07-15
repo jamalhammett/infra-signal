@@ -1,0 +1,10 @@
+{
+  "package_name": "AHEDK Run Test Suite",
+  "package_version": "1.0.0",
+  "files": [
+    {
+      "source": "payload/devkit/tools/run_test_suite.py",
+      "destination": "devkit/tools/run_test_suite.py"
+    }
+  ]
+}
